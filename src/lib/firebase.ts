@@ -2,17 +2,24 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
+// Hardcoded Firebase Config for hackathon - replace with your actual values
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: "AIzaSyDOCAbC123dEf456GhI789jKl01-MnsadasO",
+  authDomain: "disaster-relief-app.firebaseapp.com",
+  projectId: "disaster-relief-app",
+  storageBucket: "disaster-relief-app.appspot.com",
+  messagingSenderId: "123456789012",
+  appId: "1:123456789012:web:abc123def456ghi789jkl",
 };
 
 // Initialize Firebase (prevent re-initialization)
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+let app;
+if (getApps().length > 0) {
+  app = getApp();
+} else {
+  app = initializeApp(firebaseConfig);
+  window.alert("FIREBASE CONNECTED");
+}
 
 // Initialize Firestore Database
 export const db = getFirestore(app);

@@ -313,7 +313,23 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
             </TabsContent>
           </Tabs>
 
-          <div className="mt-6 pt-4 border-t border-border/50">
+          <div className="mt-6 pt-4 border-t border-border/50 space-y-3">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-amber-500 text-amber-600 hover:bg-amber-50 dark:border-amber-400 dark:text-amber-400 dark:hover:bg-amber-950/30"
+              onClick={() => {
+                const skipUser: User = {
+                  id: 'skip_user_demo',
+                  name: 'Demo User',
+                  email: 'demo@example.com',
+                  role: 'admin',
+                };
+                onLogin(skipUser);
+              }}
+            >
+              Skip Login (Demo Mode)
+            </Button>
             <p className="text-xs text-muted-foreground text-center">
               {activeTab === 'signin' ? 
                 'Demo system: Use any email and password to access the platform.' :
