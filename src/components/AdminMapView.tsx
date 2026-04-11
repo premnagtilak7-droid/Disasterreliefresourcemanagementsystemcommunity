@@ -44,7 +44,7 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
   const [isResolving, setIsResolving] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapReady, setMapReady] = useState(false);
-  const [useLeaflet, setUseLeaflet] = useState(false);
+  const [useLeaflet, setUseLeaflet] = useState(true); // Default to Leaflet (free, no API key needed)
   const mapRef = useRef<google.maps.Map | null>(null);
   const previousAlertIdsRef = useRef<Set<string>>(new Set());
 

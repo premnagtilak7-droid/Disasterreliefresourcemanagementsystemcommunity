@@ -75,17 +75,21 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
 
   // Auto-scroll to newest message when messages change
   useEffect(() => {
-    if (scrollAreaRef.current) {
-      // Use setTimeout to ensure DOM has updated
-      setTimeout(() => {
-        const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
-        if (scrollContainer) {
-          scrollContainer.scrollTop = scrollContainer.scrollHeight;
-        } else if (scrollAreaRef.current) {
-          scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+    // Use setTimeout to ensure DOM has updated
+    const scrollToBottom = () => {
+      if (scrollAreaRef.current) {
+        const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+        if (viewport) {
+          viewport.scrollTo({
+            top: viewport.scrollHeight,
+            behavior: 'smooth'
+          });
         }
-      }, 100);
-    }
+      }
+    };
+    
+    setTimeout(scrollToBottom, 50);
+    setTimeout(scrollToBottom, 200); // Double-check after animations
   }, [messages, isTyping]);
 
   const getWelcomeMessage = (): Message => {
@@ -324,8 +328,8 @@ What specifically would you like help with?`;
           </div>
 
           {/* Messages */}
-          <ScrollArea className="flex-1 pr-4" ref={scrollAreaRef}>
-            <div className="space-y-4">
+          <ScrollArea className="flex-1 h-[280px] pr-4" ref={scrollAreaRef}>
+            <div className="space-y-4 pb-2">
               {messages.map((message) => (
                 <div
                   key={message.id}
