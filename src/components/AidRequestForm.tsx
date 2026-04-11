@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User } from './AuthSystem';
+import { submitSOS } from '@/lib/alerts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -59,11 +60,23 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
     e.preventDefault();
     setIsSubmitting(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsSubmitted(true);
-    setIsSubmitting(false);
+    try {
+      // Submit SOS alert to Firebase
+      await submitSOS({
+        name: user.name,
+        phone: formData.contactPhone,
+        location: formData.location,
+        emergencyType: formData.aidType,
+        description: formData.description,
+      });
+      
+      setIsSubmitted(true);
+    } catch (error) {
+      console.error("Failed to submit SOS:", error);
+      alert("Failed to submit request. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleLocationDetect = () => {

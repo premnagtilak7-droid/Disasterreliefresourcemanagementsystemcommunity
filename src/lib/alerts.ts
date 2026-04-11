@@ -30,9 +30,31 @@ export async function submitSOS(alertData: SOSAlert): Promise<string> {
     };
 
     const docRef = await addDoc(collection(db, "alerts"), alertDocument);
+    console.log("DATA SENT SUCCESSFULLY");
     return docRef.id;
   } catch (error) {
     console.error("Error submitting SOS alert:", error);
     throw new Error("Failed to submit SOS alert. Please try again.");
+  }
+}
+
+/**
+ * Test Firebase connection by sending a random test document
+ * @returns The document ID of the test document
+ */
+export async function testFirebaseConnection(): Promise<string> {
+  try {
+    const testDoc = {
+      testId: `test_${Math.random().toString(36).substring(7)}`,
+      message: "Firebase connection test",
+      timestamp: serverTimestamp(),
+    };
+
+    const docRef = await addDoc(collection(db, "alerts"), testDoc);
+    console.log("DATA SENT SUCCESSFULLY");
+    return docRef.id;
+  } catch (error) {
+    console.error("Error testing Firebase connection:", error);
+    throw new Error("Failed to connect to Firebase.");
   }
 }

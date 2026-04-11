@@ -6,8 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ThemeToggle } from './ThemeToggle';
-import { UserCheck, Shield, Heart, Users, Eye, EyeOff } from 'lucide-react';
+import { UserCheck, Shield, Heart, Users, Eye, EyeOff, Zap } from 'lucide-react';
 import { roleDescriptions } from './constants/uiConstants';
+import { testFirebaseConnection } from '@/lib/alerts';
 
 export type UserRole = 'admin' | 'donor' | 'volunteer' | 'victim';
 
@@ -329,6 +330,22 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
               }}
             >
               Skip Login (Demo Mode)
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full border-green-500 text-green-600 hover:bg-green-50 dark:border-green-400 dark:text-green-400 dark:hover:bg-green-950/30"
+              onClick={async () => {
+                try {
+                  const docId = await testFirebaseConnection();
+                  alert(`Firebase connected! Test document ID: ${docId}`);
+                } catch (error) {
+                  alert('Firebase connection failed. Check console for details.');
+                }
+              }}
+            >
+              <Zap className="h-4 w-4 mr-2" />
+              Test Connection
             </Button>
             <p className="text-xs text-muted-foreground text-center">
               {activeTab === 'signin' ? 
