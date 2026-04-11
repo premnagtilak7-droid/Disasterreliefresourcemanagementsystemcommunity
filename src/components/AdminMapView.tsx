@@ -70,9 +70,13 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
     }
   }, []);
 
+  // Only load Google Maps if we have an API key
+  const hasApiKey = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: hasApiKey ? import.meta.env.VITE_GOOGLE_MAPS_API_KEY : 'DUMMY_KEY',
     libraries,
+    skipGoogleMapsApiJs: !hasApiKey, // Skip loading Google Maps API if no key
   });
 
   // Subscribe to all pending alerts from Firestore (real-time) with notifications
@@ -132,8 +136,7 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
   };
 
   // Check if we should use Leaflet fallback
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  const shouldUseLeaflet = !apiKey || loadError || useLeaflet;
+  const shouldUseLeaflet = !hasApiKey || loadError || useLeaflet;
 
   if (!shouldUseLeaflet && !isLoaded) {
     return (

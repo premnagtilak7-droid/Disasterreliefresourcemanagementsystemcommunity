@@ -76,9 +76,13 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     };
   }, []);
 
+  // Only load Google Maps if we have an API key
+  const hasApiKey = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: hasApiKey ? import.meta.env.VITE_GOOGLE_MAPS_API_KEY : 'DUMMY_KEY',
     libraries,
+    skipGoogleMapsApiJs: !hasApiKey, // Skip loading Google Maps API if no key
   });
 
   // Get user's current location with live tracking using watchPosition
@@ -238,9 +242,8 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     }
   };
 
-  // Check if API key is missing or if load failed - use Leaflet fallback
-  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  const shouldUseLeaflet = !apiKey || loadError || useLeaflet;
+  // Check if we should use Leaflet fallback
+  const shouldUseLeaflet = !hasApiKey || loadError || useLeaflet;
 
   // If using Leaflet, only need userLocation (not Google Maps isLoaded)
   if (!shouldUseLeaflet && !isLoaded) {
