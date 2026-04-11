@@ -18,7 +18,8 @@ import { AnalyticsView } from '../AnalyticsView';
 import { AdminMapView } from '../AdminMapView';
 import { VolunteerManagement } from '../VolunteerManagement';
 import { InventoryManagement } from '../InventoryManagement';
-import { getPendingAlertsCount, getActiveVolunteersCount } from '@/lib/alerts';
+import { getPendingAlertsCount, getActiveVolunteersCount, subscribeToPendingAlerts, AlertWithId } from '@/lib/alerts';
+import { getTotalUserCount, getUserCountByRole } from '@/lib/users';
 
 interface AdminDashboardProps {
   user: User;
@@ -45,17 +46,19 @@ const mockData = {
 export function AdminDashboard({ user, activeView, setActiveView }: AdminDashboardProps) {
   const [pendingRequests, setPendingRequests] = useState(0);
   const [activeVolunteers, setActiveVolunteers] = useState(0);
+  const [totalUsers, setTotalUsers] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Fetch initial counts
   useEffect(() => {
     async function fetchStats() {
       try {
-        const [pendingCount, volunteersCount] = await Promise.all([
-          getPendingAlertsCount(),
+        const [volunteersCount, usersCount] = await Promise.all([
           getActiveVolunteersCount(),
+          getTotalUserCount(),
         ]);
-        setPendingRequests(pendingCount);
         setActiveVolunteers(volunteersCount);
+        setTotalUsers(usersCount);
       } catch (error) {
         console.error("Error fetching stats:", error);
       } finally {
@@ -63,6 +66,15 @@ export function AdminDashboard({ user, activeView, setActiveView }: AdminDashboa
       }
     }
     fetchStats();
+  }, []);
+
+  // Subscribe to real-time pending alerts count
+  useEffect(() => {
+    const unsubscribe = subscribeToPendingAlerts((alerts: AlertWithId[]) => {
+      setPendingRequests(alerts.length);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   if (activeView === 'analytics') {

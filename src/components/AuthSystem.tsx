@@ -6,9 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ThemeToggle } from './ThemeToggle';
-import { UserCheck, Shield, Heart, Users, Eye, EyeOff, Zap } from 'lucide-react';
+import { UserCheck, Shield, Heart, Users, Eye, EyeOff } from 'lucide-react';
 import { roleDescriptions } from './constants/uiConstants';
-import { testFirebaseConnection } from '@/lib/alerts';
+import { registerUser, loginUser } from '@/lib/users';
 
 export type UserRole = 'admin' | 'donor' | 'volunteer' | 'victim';
 
@@ -38,7 +38,6 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
   // Sign In Form State
   const [signInEmail, setSignInEmail] = useState('');
   const [signInPassword, setSignInPassword] = useState('');
-  const [signInRole, setSignInRole] = useState<UserRole>('victim');
   
   // Sign Up Form State
   const [signUpName, setSignUpName] = useState('');
@@ -51,18 +50,23 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1200));
-    
-    const mockUser: User = {
-      id: `user_${Date.now()}`,
-      name: signInEmail.split('@')[0] || 'User',
-      email: signInEmail,
-      role: signInRole,
-    };
-    
-    onLogin(mockUser);
-    setIsLoading(false);
+    try {
+      const userData = await loginUser(signInEmail, signInPassword);
+      
+      const user: User = {
+        id: userData.uid,
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+      };
+      
+      onLogin(user);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Login failed';
+      alert(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -72,21 +76,36 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
       alert('Passwords do not match');
       return;
     }
+
+    if (signUpPassword.length < 6) {
+      alert('Password must be at least 6 characters');
+      return;
+    }
     
     setIsLoading(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const mockUser: User = {
-      id: `user_${Date.now()}`,
-      name: signUpName,
-      email: signUpEmail,
-      role: signUpRole,
-    };
-    
-    onLogin(mockUser);
-    setIsLoading(false);
+    try {
+      const userData = await registerUser(
+        signUpEmail,
+        signUpPassword,
+        signUpName,
+        signUpRole
+      );
+      
+      const user: User = {
+        id: userData.uid,
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+      };
+      
+      onLogin(user);
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Registration failed';
+      alert(errorMessage);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -155,39 +174,6 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
                         <Eye className="h-4 w-4 text-muted-foreground" />
                       )}
                     </Button>
-                  </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="signin-role">Role</Label>
-                  <Select value={signInRole} onValueChange={(value: UserRole) => setSignInRole(value)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select your role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(Object.keys(roleIcons) as UserRole[]).map((role) => {
-                        const Icon = roleIcons[role];
-                        return (
-                          <SelectItem key={role} value={role}>
-                            <div className="flex items-center gap-2">
-                              <Icon className="h-4 w-4" />
-                              <span className="capitalize">{role}</span>
-                            </div>
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="p-3 bg-blue-50/70 dark:bg-blue-950/30 rounded-lg border border-blue-200/50 dark:border-blue-800/50">
-                  <div className="flex items-start gap-2">
-                    {React.createElement(roleIcons[signInRole], { 
-                      className: "h-4 w-4 mt-0.5 text-blue-600 dark:text-blue-400" 
-                    })}
-                    <p className="text-sm text-blue-800 dark:text-blue-200">
-                      {roleDescriptions[signInRole]}
-                    </p>
                   </div>
                 </div>
                 
@@ -314,43 +300,11 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
             </TabsContent>
           </Tabs>
 
-          <div className="mt-6 pt-4 border-t border-border/50 space-y-3">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-amber-500 text-amber-600 hover:bg-amber-50 dark:border-amber-400 dark:text-amber-400 dark:hover:bg-amber-950/30"
-              onClick={() => {
-                const skipUser: User = {
-                  id: 'skip_user_demo',
-                  name: 'Demo User',
-                  email: 'demo@example.com',
-                  role: 'admin',
-                };
-                onLogin(skipUser);
-              }}
-            >
-              Skip Login (Demo Mode)
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-green-500 text-green-600 hover:bg-green-50 dark:border-green-400 dark:text-green-400 dark:hover:bg-green-950/30"
-              onClick={async () => {
-                try {
-                  const docId = await testFirebaseConnection();
-                  alert(`Firebase connected! Test document ID: ${docId}`);
-                } catch (error) {
-                  alert('Firebase connection failed. Check console for details.');
-                }
-              }}
-            >
-              <Zap className="h-4 w-4 mr-2" />
-              Test Connection
-            </Button>
+          <div className="mt-6 pt-4 border-t border-border/50">
             <p className="text-xs text-muted-foreground text-center">
               {activeTab === 'signin' ? 
-                'Demo system: Use any email and password to access the platform.' :
-                'Join the disaster relief network. All roles available for demo purposes.'
+                'Sign in with your registered email and password.' :
+                'Register to join the disaster relief network.'
               }
             </p>
           </div>

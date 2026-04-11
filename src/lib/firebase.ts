@@ -18,7 +18,7 @@ if (getApps().length > 0) {
   app = getApp();
 } else {
   app = initializeApp(firebaseConfig);
-  window.alert("FIREBASE CONNECTED");
+  console.log("Firebase app initialized");
 }
 
 // Initialize Firestore Database
@@ -26,7 +26,5 @@ export const db = getFirestore(app);
 
 // Initialize Firebase Auth
 export const auth = getAuth(app);
-
-console.log("Firebase Initialized");
 
 export default app;
