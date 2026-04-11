@@ -228,10 +228,45 @@ export async function signInWithGoogle(role: UserRole = 'victim'): Promise<UserD
  */
 export async function resetPassword(email: string): Promise<void> {
   try {
-    await sendPasswordResetEmail(auth, email);
-    console.log("PASSWORD RESET EMAIL SENT");
+    console.log("[v0] Attempting to send password reset email to:", email);
+    
+    // Configure action code settings for the reset email
+    const actionCodeSettings = {
+      url: window.location.origin + '/login',
+      handleCodeInApp: false,
+    };
+    
+    await sendPasswordResetEmail(auth, email, actionCodeSettings);
+    console.log("[v0] PASSWORD RESET EMAIL SENT SUCCESSFULLY to:", email);
   } catch (error: unknown) {
-    console.error("Error sending reset email:", error);
+    console.error("[v0] Error sending reset email:", error);
+    
+    const firebaseError = error as { code?: string; message?: string };
+    console.error("[v0] Firebase error code:", firebaseError.code);
+    
+    // Handle specific Firebase Auth error codes
+    if (firebaseError.code === 'auth/user-not-found') {
+      // For security, we still show success message but log the issue
+      console.log("[v0] No user found with this email, but showing success for security");
+      return; // Don't throw error - show success message anyway for security
+    }
+    
+    if (firebaseError.code === 'auth/invalid-email') {
+      throw new Error("Invalid email address format. Please check and try again.");
+    }
+    
+    if (firebaseError.code === 'auth/too-many-requests') {
+      throw new Error("Too many password reset attempts. Please try again later.");
+    }
+    
+    if (firebaseError.code === 'auth/network-request-failed') {
+      throw new Error("Network error. Please check your internet connection and try again.");
+    }
+    
+    if (firebaseError.code === 'auth/invalid-api-key') {
+      throw new Error("Configuration error. Please contact support.");
+    }
+    
     const errorMessage = error instanceof Error ? error.message : "Failed to send reset email";
     throw new Error(errorMessage);
   }

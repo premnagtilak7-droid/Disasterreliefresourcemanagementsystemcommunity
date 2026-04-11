@@ -112,7 +112,12 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
     
     try {
       await resetPassword(resetEmail);
-      toast.success('Password reset email sent! Check your inbox.');
+      toast.success('Password reset email sent!', {
+        duration: 5000,
+      });
+      toast.info('Check your inbox and spam folder. The email may take a few minutes to arrive.', {
+        duration: 8000,
+      });
       setShowResetPassword(false);
       setResetEmail('');
     } catch (error: unknown) {
