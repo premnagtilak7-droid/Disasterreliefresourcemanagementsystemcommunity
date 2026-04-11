@@ -73,39 +73,48 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
     }
   }, [isOpen, user]);
 
-  // Auto-scroll to newest message when messages change
+  // Auto-scroll to newest message when messages change - more robust implementation
   useEffect(() => {
-    // Use setTimeout to ensure DOM has updated
     const scrollToBottom = () => {
       if (scrollAreaRef.current) {
         const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
         if (viewport) {
-          viewport.scrollTo({
-            top: viewport.scrollHeight,
-            behavior: 'smooth'
-          });
+          // Force scroll to absolute bottom
+          viewport.scrollTop = viewport.scrollHeight;
         }
       }
     };
     
+    // Multiple attempts to ensure scroll happens after all renders
+    requestAnimationFrame(scrollToBottom);
     setTimeout(scrollToBottom, 50);
-    setTimeout(scrollToBottom, 200); // Double-check after animations
+    setTimeout(scrollToBottom, 150);
+    setTimeout(scrollToBottom, 300); // Final check after animations complete
   }, [messages, isTyping]);
 
   const getWelcomeMessage = (): Message => {
-    const userRole = user?.role || 'guest';
-    const roleMessages = {
-      admin: "Hello! I'm your AI assistant for disaster relief management. I can help you monitor operations, manage volunteers, or navigate analytics.",
-      volunteer: "Hi there! I'm here to help you with task assignments, find locations, or connect with your team.",
-      donor: "Welcome! I can help you track donations, find relief projects, or show your impact reports.",
-      victim: "Hello, I'm here to help you access emergency assistance. I can guide you through aid requests or help find nearby resources.",
+    const userRole = user?.role?.toLowerCase() || 'guest';
+    const userName = user?.name || 'there';
+    
+    const roleMessages: Record<string, string> = {
+      admin: `Hello ${userName}! I'm your AI assistant for disaster relief management. I can help you monitor operations, manage volunteers, or navigate analytics.`,
+      volunteer: `Hi ${userName}! I'm here to help you with rescue missions, finding victims, and coordinating with your team. Check the map view for nearby alerts.`,
+      donor: `Welcome ${userName}! I can help you track donations, find relief projects, or show your impact reports.`,
+      victim: `Hello ${userName}, I'm here to help you get emergency assistance. I can guide you through aid requests, help find nearby resources, or connect you with volunteers.`,
       guest: "Hi! I'm your disaster relief assistant. I can help with emergency guidance, system navigation, or connecting you with resources."
     };
+
+    // Handle role mapping (ensure consistency)
+    const normalizedRole = userRole === 'volunteer' ? 'volunteer' 
+      : userRole === 'victim' ? 'victim'
+      : userRole === 'admin' ? 'admin'
+      : userRole === 'donor' ? 'donor'
+      : 'guest';
 
     return {
       id: Date.now().toString(),
       type: 'bot',
-      content: roleMessages[userRole as keyof typeof roleMessages],
+      content: roleMessages[normalizedRole] || roleMessages['guest'],
       timestamp: new Date(),
       actions: getWelcomeActions()
     };
@@ -114,19 +123,22 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
   const getWelcomeActions = (): ChatAction[] => {
     if (!user) return [];
 
-    const commonActions = [
+    const commonActions: ChatAction[] = [
       { label: "Emergency Contacts", action: () => handleQuickAction("Emergency Contacts"), icon: Phone },
       { label: "System Help", action: () => handleQuickAction("System Help") }
     ];
 
-    const roleActions = {
+    const userRole = user.role?.toLowerCase() || 'guest';
+
+    const roleActions: Record<string, ChatAction[]> = {
       admin: [
         { label: "View Analytics", action: () => onNavigate?.('analytics') },
         { label: "Manage Volunteers", action: () => onNavigate?.('volunteers') }
       ],
       volunteer: [
-        { label: "My Tasks", action: () => onNavigate?.('tasks') },
-        { label: "Field Map", action: () => onNavigate?.('map') }
+        { label: "View Map", action: () => onNavigate?.('map'), icon: MapPin },
+        { label: "Rescue History", action: () => onNavigate?.('history') },
+        { label: "My Tasks", action: () => onNavigate?.('tasks') }
       ],
       donor: [
         { label: "Donate Now", action: () => handleQuickAction("Donate"), icon: Heart },
@@ -134,11 +146,12 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
       ],
       victim: [
         { label: "Request Aid", action: () => onNavigate?.('request'), icon: AlertTriangle },
+        { label: "Track My Request", action: () => onNavigate?.('status') },
         { label: "Find Resources", action: () => onNavigate?.('resources') }
       ]
     };
 
-    return [...(roleActions[user.role] || []), ...commonActions];
+    return [...(roleActions[userRole] || []), ...commonActions];
   };
 
   const handleQuickAction = (action: string) => {
@@ -153,14 +166,16 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
   };
 
   const getSystemHelp = (): string => {
-    const helpText = {
-      admin: "• Dashboard - Monitor all operations\n• Analytics - Performance insights\n• Volunteers - Team management\n• Inventory - Supply tracking\n• Map View - Real-time locations",
-      volunteer: "• Dashboard - Your overview\n• Tasks - Current assignments\n• Assignments - Team management\n• Field Map - Operational areas",
-      donor: "• Dashboard - Donation overview\n• My Donations - Contribution history\n• Projects - Active campaigns\n• Impact Report - Your difference",
-      victim: "• Dashboard - Personal overview\n• Request Aid - Emergency assistance\n• Aid Status - Track requests\n• Resources - Nearby help centers"
+    const userRole = user?.role?.toLowerCase() || 'guest';
+    
+    const helpText: Record<string, string> = {
+      admin: "- Dashboard - Monitor all operations\n- Analytics - Performance insights\n- Volunteers - Team management\n- Inventory - Supply tracking\n- Map View - Real-time locations",
+      volunteer: "- Dashboard - Your overview and stats\n- Map View - See nearby SOS alerts within 2km\n- Start Mission - Navigate to victims using Google Maps\n- Rescue History - View your completed rescues\n- Settings - Manage your profile",
+      donor: "- Dashboard - Donation overview\n- My Donations - Contribution history\n- Projects - Active campaigns\n- Impact Report - Your difference",
+      victim: "- Dashboard - Personal overview\n- Request Aid - Submit emergency SOS with photo\n- Aid Status - Track your request\n- Resources - Find nearby help centers\n- Emergency SOS - One-tap emergency button"
     };
 
-    return helpText[user?.role as keyof typeof helpText] || "Navigate using the menu at the top of the screen.";
+    return helpText[userRole] || "Navigate using the menu at the top of the screen.";
   };
 
   const generateBotResponse = (userMessage: string): string => {

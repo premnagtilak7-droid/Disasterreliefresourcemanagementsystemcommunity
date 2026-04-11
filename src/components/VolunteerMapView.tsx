@@ -319,7 +319,18 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
                   Red markers indicate pending SOS alerts
                 </CardDescription>
               </div>
-              {!shouldUseLeaflet && (
+              {shouldUseLeaflet ? (
+                hasApiKey && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setUseLeaflet(false)}
+                    className="text-xs"
+                  >
+                    Use Google Maps
+                  </Button>
+                )
+              ) : (
                 <Button 
                   variant="outline" 
                   size="sm"

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { 
@@ -14,10 +14,9 @@ import {
   ArrowLeft,
   Loader2
 } from 'lucide-react';
-import { AlertWithId } from '@/lib/alerts';
+import { AlertWithId, completeAndArchiveMission } from '@/lib/alerts';
 import { GoogleMap, useJsApiLoader, DirectionsRenderer, Marker, Libraries } from '@react-google-maps/api';
-import { doc, updateDoc, addDoc, collection, deleteDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+
 import { toast } from 'sonner';
 
 const libraries: Libraries = ['places', 'geometry', 'directions'];
@@ -75,25 +74,8 @@ export function MissionSummary({
   const handleResolve = async () => {
     setIsResolving(true);
     try {
-      // 1. Update alert status to resolved
-      const alertRef = doc(db, 'alerts', alert.id);
-      await updateDoc(alertRef, {
-        status: 'resolved',
-        resolverId: volunteerId,
-        resolverName: volunteerName,
-        resolvedAt: serverTimestamp(),
-      });
-
-      // 2. Move to rescue history collection
-      await addDoc(collection(db, 'rescueHistory'), {
-        ...alert,
-        status: 'resolved',
-        resolverId: volunteerId,
-        resolverName: volunteerName,
-        resolvedAt: serverTimestamp(),
-        originalAlertId: alert.id,
-      });
-
+      // Use the centralized function to complete and archive the mission
+      await completeAndArchiveMission(alert.id, volunteerId, volunteerName);
       toast.success('Mission completed! Added to your rescue history.');
       onResolved();
     } catch (error) {
@@ -301,6 +283,29 @@ export function MissionSummary({
           >
             <Navigation className="h-4 w-4 mr-2" />
             Open in Google Maps
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Start Mission - Primary Action */}
+      <Card className="border-green-200 bg-green-50 dark:bg-green-950/30">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-green-800 dark:text-green-300">
+            <Navigation className="h-5 w-5" />
+            Start Mission
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Get turn-by-turn navigation to the victim&apos;s location using Google Maps.
+          </p>
+          <Button 
+            className="w-full bg-green-600 hover:bg-green-700 text-lg py-6"
+            onClick={handleNavigate}
+            disabled={!alert.latitude || !alert.longitude}
+          >
+            <Navigation className="h-5 w-5 mr-2" />
+            Start Navigation to Victim
           </Button>
         </CardContent>
       </Card>

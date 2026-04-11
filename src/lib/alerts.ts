@@ -8,7 +8,9 @@ import {
   updateDoc, 
   doc, 
   getCountFromServer,
-  getDocs 
+  getDocs,
+  getDoc,
+  deleteDoc
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { triageAndUpdateAlert } from "./gemini";
@@ -261,6 +263,51 @@ export async function getResolvedCountByVolunteer(volunteerId: string): Promise<
     return snapshot.data().count;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Complete a mission and move it to rescue history
+ * This archives the alert for the volunteer's portfolio
+ */
+export async function completeAndArchiveMission(
+  alertId: string,
+  volunteerId: string,
+  volunteerName: string
+): Promise<void> {
+  try {
+    // 1. Get the current alert data
+    const alertRef = doc(db, "alerts", alertId);
+    const alertSnapshot = await getDoc(alertRef);
+    
+    if (!alertSnapshot.exists()) {
+      throw new Error("Alert not found");
+    }
+    
+    const alertData = alertSnapshot.data();
+    
+    // 2. Update alert status to resolved
+    await updateDoc(alertRef, {
+      status: "resolved",
+      resolverId: volunteerId,
+      resolverName: volunteerName,
+      resolvedAt: serverTimestamp(),
+    });
+    
+    // 3. Add to rescue history collection
+    await addDoc(collection(db, "rescueHistory"), {
+      ...alertData,
+      status: "resolved",
+      resolverId: volunteerId,
+      resolverName: volunteerName,
+      resolvedAt: serverTimestamp(),
+      originalAlertId: alertId,
+    });
+    
+    console.log("MISSION COMPLETED AND ARCHIVED SUCCESSFULLY");
+  } catch (error) {
+    console.error("Error completing mission:", error);
+    throw new Error("Failed to complete mission.");
   }
 }
 

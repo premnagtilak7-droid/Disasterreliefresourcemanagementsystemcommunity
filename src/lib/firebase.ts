@@ -3,14 +3,15 @@ import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
-// Hardcoded Firebase Config for hackathon
+// Firebase Config using VITE_ environment variables
+// Falls back to hardcoded values for development/hackathon
 const firebaseConfig = {
-  apiKey: "AIzaSyDuCy0w7IrNmU5jd1wagE_kmaJS6hrBD-c",
-  authDomain: "relief-map-ee6cf.firebaseapp.com",
-  projectId: "relief-map-ee6cf",
-  storageBucket: "relief-map-ee6cf.firebasestorage.app",
-  messagingSenderId: "691243225791",
-  appId: "1:691243225791:web:b5acb73820d1e08f4b6c0a",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDuCy0w7IrNmU5jd1wagE_kmaJS6hrBD-c",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "relief-map-ee6cf.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "relief-map-ee6cf",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "relief-map-ee6cf.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "691243225791",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:691243225791:web:b5acb73820d1e08f4b6c0a",
 };
 
 // Initialize Firebase (prevent re-initialization)
