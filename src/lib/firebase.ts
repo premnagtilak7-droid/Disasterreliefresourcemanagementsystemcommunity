@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+import { getAuth, browserLocalPersistence, setPersistence } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 
 // Firebase Config using VITE_ environment variables
@@ -26,8 +26,17 @@ if (getApps().length > 0) {
 // Initialize Firestore Database
 export const db = getFirestore(app);
 
-// Initialize Firebase Auth
+// Initialize Firebase Auth with browser local persistence
 export const auth = getAuth(app);
+
+// Set persistence to LOCAL to keep user logged in across page refreshes
+setPersistence(auth, browserLocalPersistence)
+  .then(() => {
+    console.log("Firebase Auth persistence set to LOCAL");
+  })
+  .catch((error) => {
+    console.error("Error setting auth persistence:", error);
+  });
 
 // Initialize Firebase Storage
 export const storage = getStorage(app);
