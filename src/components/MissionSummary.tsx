@@ -46,9 +46,13 @@ export function MissionSummary({
   const [isResolving, setIsResolving] = useState(false);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
 
+  // Only load Google Maps if we have an API key
+  const hasApiKey = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: hasApiKey ? import.meta.env.VITE_GOOGLE_MAPS_API_KEY : 'DUMMY_KEY',
     libraries,
+    skipGoogleMapsApiJs: !hasApiKey, // Skip loading if no key
   });
 
   // Calculate directions when map is loaded
@@ -236,19 +240,23 @@ export function MissionSummary({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {loadError && (
-            <div className="h-[300px] flex items-center justify-center bg-gray-100 rounded-lg">
-              <p className="text-red-500">Error loading map</p>
+          {(loadError || !hasApiKey) && (
+            <div className="h-[300px] flex flex-col items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-lg">
+              <MapPin className="h-12 w-12 text-muted-foreground mb-2" />
+              <p className="text-muted-foreground text-center">
+                {!hasApiKey ? 'Google Maps API key not configured' : 'Error loading map'}
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">Use the button below to navigate</p>
             </div>
           )}
           
-          {!isLoaded && !loadError && (
-            <div className="h-[300px] flex items-center justify-center bg-gray-100 rounded-lg">
+          {!isLoaded && !loadError && hasApiKey && (
+            <div className="h-[300px] flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-lg">
               <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
             </div>
           )}
           
-          {isLoaded && !loadError && alert.latitude && alert.longitude && (
+          {isLoaded && !loadError && hasApiKey && alert.latitude && alert.longitude && (
             <GoogleMap
               mapContainerStyle={mapContainerStyle}
               center={{ lat: alert.latitude, lng: alert.longitude }}
