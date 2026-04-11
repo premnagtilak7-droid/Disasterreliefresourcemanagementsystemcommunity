@@ -4,12 +4,12 @@ import { getAuth } from "firebase/auth";
 
 // Hardcoded Firebase Config for hackathon
 const firebaseConfig = {
-  apiKey: "AIzaSyDavULjoQSsrKM4ox77tTki3VAwFQLPRY",
-  authDomain: "relief-map-c4c06.firebaseapp.com",
-  projectId: "relief-map-c4c06",
-  storageBucket: "relief-map-c4c06.firebasestorage.app",
-  messagingSenderId: "981339164232",
-  appId: "1:981339164232:web:c42fb9812c38a81ca1927d",
+  apiKey: "AIzaSyDuCy0w7IrNmU5jd1wagE_kmaJS6hrBD-c",
+  authDomain: "relief-map-ee6cf.firebaseapp.com",
+  projectId: "relief-map-ee6cf",
+  storageBucket: "relief-map-ee6cf.firebasestorage.app",
+  messagingSenderId: "691243225791",
+  appId: "1:691243225791:web:b5acb73820d1e08f4b6c0a",
 };
 
 // Initialize Firebase (prevent re-initialization)
