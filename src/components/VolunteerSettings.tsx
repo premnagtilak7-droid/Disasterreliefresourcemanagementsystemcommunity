@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Badge } from './ui/badge';
-import { MapPin, Phone, CheckCircle, ToggleLeft, Loader2, User, Mail, Save } from 'lucide-react';
+import { MapPin, Phone, CheckCircle, ToggleLeft, Loader2, User as UserIcon, Mail, Save } from 'lucide-react';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { startVolunteerTracking } from '@/lib/geolocation';
@@ -125,7 +125,7 @@ export function VolunteerSettings({ user }: VolunteerSettingsProps) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <User className="h-5 w-5" />
+            <UserIcon className="h-5 w-5" />
             Your Profile
           </CardTitle>
           <CardDescription>Your account information</CardDescription>
@@ -135,7 +135,7 @@ export function VolunteerSettings({ user }: VolunteerSettingsProps) {
             <div className="space-y-2">
               <Label>Name</Label>
               <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
-                <User className="h-4 w-4 text-muted-foreground" />
+                <UserIcon className="h-4 w-4 text-muted-foreground" />
                 <span>{user.name}</span>
               </div>
             </div>
