@@ -19,6 +19,7 @@ import {
 } from '@/lib/alerts';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Libraries } from '@react-google-maps/api';
 import { toast } from 'sonner';
+import { LeafletMap } from './LeafletMap';
 
 // Define libraries outside component to prevent re-renders
 const libraries: Libraries = ['places', 'geometry'];
@@ -43,6 +44,7 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
   const [isResolving, setIsResolving] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const [mapReady, setMapReady] = useState(false);
+  const [useLeaflet, setUseLeaflet] = useState(false);
   const mapRef = useRef<google.maps.Map | null>(null);
   const previousAlertIdsRef = useRef<Set<string>>(new Set());
 
@@ -129,41 +131,11 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
     }
   };
 
-  // Check if API key is missing
+  // Check if we should use Leaflet fallback
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    return (
-      <div className="p-6">
-        <Card className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950/30">
-          <CardContent className="p-6 text-center">
-            <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-yellow-800 dark:text-yellow-300">Google Maps API Key Required</h3>
-            <p className="text-yellow-600 dark:text-yellow-400 text-sm mt-2">
-              Please set VITE_GOOGLE_MAPS_API_KEY in your environment variables.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const shouldUseLeaflet = !apiKey || loadError || useLeaflet;
 
-  if (loadError) {
-    return (
-      <div className="p-6">
-        <Card className="border-red-200 bg-red-50 dark:bg-red-950/30">
-          <CardContent className="p-6 text-center">
-            <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-red-800 dark:text-red-300">Map Failed to Load</h3>
-            <p className="text-red-600 dark:text-red-400 text-sm mt-2">
-              Please verify your Google Maps API key is valid and has the required APIs enabled.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!isLoaded) {
+  if (!shouldUseLeaflet && !isLoaded) {
     return (
       <div className="p-6 flex items-center justify-center min-h-96">
         <div className="text-center space-y-4">
@@ -192,16 +164,40 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
         {/* Google Map */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <MapPin className="h-5 w-5" />
-              All Pending Alerts
-            </CardTitle>
-            <CardDescription>
-              Click on red markers to view details and resolve
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <MapPin className="h-5 w-5" />
+                  All Pending Alerts
+                </CardTitle>
+                <CardDescription>
+                  Click on red markers to view details and resolve
+                </CardDescription>
+              </div>
+              {!shouldUseLeaflet && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setUseLeaflet(true)}
+                  className="text-xs"
+                >
+                  Use Free Map
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
-            <GoogleMap
+            {shouldUseLeaflet ? (
+              <LeafletMap
+                userLocation={mapCenter}
+                alerts={alerts}
+                selectedAlert={selectedAlert}
+                onSelectAlert={setSelectedAlert}
+                onClosePopup={() => setSelectedAlert(null)}
+                onStartMission={() => {}}
+              />
+            ) : (
+              <GoogleMap
               mapContainerStyle={mapContainerStyle}
               center={mapCenter}
               zoom={12}
@@ -266,7 +262,8 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
                   </div>
                 </InfoWindow>
               )}
-            </GoogleMap>
+              </GoogleMap>
+            )}
           </CardContent>
         </Card>
 

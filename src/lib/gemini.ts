@@ -114,6 +114,18 @@ export interface VisionAnalysis {
  * @param imageUrl - The Firebase Storage URL of the uploaded image
  */
 export async function analyzeDisasterPhoto(imageUrl: string): Promise<VisionAnalysis> {
+  // Check if API key exists
+  if (!import.meta.env.VITE_GEMINI_API_KEY) {
+    console.warn("VITE_GEMINI_API_KEY not set - skipping AI analysis");
+    return {
+      severity: 5,
+      primaryNeed: "Other",
+      description: "AI analysis unavailable - API key not configured",
+      urgentDetails: "Manual assessment required",
+      isFalseAlarm: false,
+    };
+  }
+
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
@@ -206,6 +218,17 @@ Severity Guidelines (for REAL disasters only):
  * This is faster than waiting for Firebase upload
  */
 export async function analyzeBase64Photo(base64Data: string): Promise<VisionAnalysis> {
+  // Check if API key exists
+  if (!import.meta.env.VITE_GEMINI_API_KEY) {
+    console.warn("VITE_GEMINI_API_KEY not set - skipping AI analysis");
+    return {
+      severity: 5,
+      primaryNeed: "Other",
+      description: "AI analysis unavailable - API key not configured",
+      isFalseAlarm: false,
+    };
+  }
+
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 

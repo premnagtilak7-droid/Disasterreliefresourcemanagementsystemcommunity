@@ -20,6 +20,7 @@ import {
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Circle, Libraries } from '@react-google-maps/api';
 import { toast } from 'sonner';
 import { MissionSummary } from './MissionSummary';
+import { LeafletMap } from './LeafletMap';
 
 // Define libraries outside component to prevent re-renders
 const libraries: Libraries = ['places', 'geometry'];
@@ -49,6 +50,7 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
   const [locationError, setLocationError] = useState<string | null>(null);
   const [activeMission, setActiveMission] = useState<AlertWithId | null>(null);
   const [mapReady, setMapReady] = useState(false);
+  const [useLeaflet, setUseLeaflet] = useState(false);
   const mapRef = useRef<google.maps.Map | null>(null);
   const previousAlertIdsRef = useRef<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -236,46 +238,28 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     }
   };
 
-  // Check if API key is missing
+  // Check if API key is missing or if load failed - use Leaflet fallback
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  if (!apiKey) {
-    return (
-      <div className="p-6">
-        <Card className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950/30">
-          <CardContent className="p-6 text-center">
-            <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-yellow-800 dark:text-yellow-300">Google Maps API Key Required</h3>
-            <p className="text-yellow-600 dark:text-yellow-400 text-sm mt-2">
-              Please set VITE_GOOGLE_MAPS_API_KEY in your environment variables.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const shouldUseLeaflet = !apiKey || loadError || useLeaflet;
 
-  if (loadError) {
-    return (
-      <div className="p-6">
-        <Card className="border-red-200 bg-red-50 dark:bg-red-950/30">
-          <CardContent className="p-6 text-center">
-            <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-red-800 dark:text-red-300">Map Failed to Load</h3>
-            <p className="text-red-600 dark:text-red-400 text-sm mt-2">
-              Please verify your Google Maps API key is valid and has the required APIs enabled (Maps JavaScript API).
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!isLoaded || !userLocation) {
+  // If using Leaflet, only need userLocation (not Google Maps isLoaded)
+  if (!shouldUseLeaflet && !isLoaded) {
     return (
       <div className="p-6 flex items-center justify-center min-h-96">
         <div className="text-center space-y-4">
           <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
-          <p className="text-muted-foreground">Loading map and detecting your location...</p>
+          <p className="text-muted-foreground">Loading map...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!userLocation) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-96">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+          <p className="text-muted-foreground">Detecting your location...</p>
         </div>
       </div>
     );
@@ -322,36 +306,64 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
         {/* Google Map */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <MapPin className="h-5 w-5" />
-              Live Alert Map
-            </CardTitle>
-            <CardDescription>
-              Red markers indicate pending SOS alerts
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <MapPin className="h-5 w-5" />
+                  Live Alert Map
+                </CardTitle>
+                <CardDescription>
+                  Red markers indicate pending SOS alerts
+                </CardDescription>
+              </div>
+              {!shouldUseLeaflet && (
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setUseLeaflet(true)}
+                  className="text-xs"
+                >
+                  Use Free Map
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="relative">
-            {/* Loading overlay until map is ready */}
-            {!mapReady && (
-              <div className="absolute inset-0 bg-background/80 z-10 flex items-center justify-center rounded-lg">
-                <div className="text-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-2" />
-                  <p className="text-sm text-muted-foreground">Initializing map...</p>
-                </div>
-              </div>
-            )}
-            <GoogleMap
-              mapContainerStyle={mapContainerStyle}
-              center={userLocation}
-              zoom={14}
-              onLoad={onMapLoad}
-              options={{
-                streetViewControl: false,
-                mapTypeControl: false,
-                fullscreenControl: false,
-                zoomControl: true,
-              }}
-            >
+            {shouldUseLeaflet ? (
+              /* Leaflet Map (Free fallback - no API key needed) */
+              <LeafletMap
+                userLocation={userLocation}
+                alerts={nearbyAlerts}
+                selectedAlert={selectedAlert}
+                onSelectAlert={setSelectedAlert}
+                onClosePopup={() => setSelectedAlert(null)}
+                onStartMission={handleStartMission}
+                radiusKm={RADIUS_KM}
+              />
+            ) : (
+              /* Google Maps */
+              <>
+                {/* Loading overlay until map is ready */}
+                {!mapReady && (
+                  <div className="absolute inset-0 bg-background/80 z-10 flex items-center justify-center rounded-lg">
+                    <div className="text-center">
+                      <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-2" />
+                      <p className="text-sm text-muted-foreground">Initializing map...</p>
+                    </div>
+                  </div>
+                )}
+                <GoogleMap
+                  mapContainerStyle={mapContainerStyle}
+                  center={userLocation}
+                  zoom={14}
+                  onLoad={onMapLoad}
+                  options={{
+                    streetViewControl: false,
+                    mapTypeControl: false,
+                    fullscreenControl: false,
+                    zoomControl: true,
+                  }}
+                >
               {/* 2km Radius Circle around volunteer location */}
               <Circle
                 center={userLocation}
@@ -430,7 +442,9 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
                   </div>
                 </InfoWindow>
               )}
-            </GoogleMap>
+                </GoogleMap>
+              </>
+            )}
           </CardContent>
         </Card>
 

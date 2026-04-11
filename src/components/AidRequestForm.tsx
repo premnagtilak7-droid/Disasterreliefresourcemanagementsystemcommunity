@@ -132,9 +132,14 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         // Instant Gemini analysis with compressed image
         const analysis = await analyzeBase64Photo(compressed);
         setInstantAnalysis(analysis);
+        toast.dismiss();
         
-        if (analysis.isFalseAlarm) {
+        if (analysis.description?.includes('API key not configured')) {
+          toast.warning('AI analysis unavailable - photo will still be uploaded');
+        } else if (analysis.isFalseAlarm) {
           toast.error(`False Alarm Detected: ${analysis.falseAlarmReason || 'Not a disaster image'}`);
+        } else if (analysis.description === 'Unable to analyze photo') {
+          toast.warning('AI could not analyze photo - manual review needed');
         } else {
           toast.success(`AI Analysis: Severity ${analysis.severity}/10 - ${analysis.primaryNeed}`);
         }
