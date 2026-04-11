@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { VolunteerMapView } from '../VolunteerMapView';
 import { VolunteerSettings } from '../VolunteerSettings';
+import { RescueHistory } from '../RescueHistory';
 import { getResolvedCountByVolunteer, subscribeToPendingAlerts } from '@/lib/alerts';
 
 interface VolunteerDashboardProps {
@@ -45,6 +46,10 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
 
   if (activeView === 'settings') {
     return <VolunteerSettings user={user} />;
+  }
+
+  if (activeView === 'history') {
+    return <RescueHistory volunteerId={user.id} />;
   }
 
   if (activeView === 'map') {
@@ -210,11 +215,11 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col items-center text-center space-y-2">
-              <Users className="h-8 w-8 text-green-600" />
-              <h3 className="font-medium">Team Management</h3>
-              <p className="text-sm text-muted-foreground">Coordinate with team</p>
-              <Button size="sm" variant="outline" onClick={() => setActiveView('assignments')}>
-                Manage Teams
+              <Award className="h-8 w-8 text-yellow-600" />
+              <h3 className="font-medium">Rescue History</h3>
+              <p className="text-sm text-muted-foreground">Your portfolio</p>
+              <Button size="sm" variant="outline" onClick={() => setActiveView('history')}>
+                View History
               </Button>
             </div>
           </CardContent>

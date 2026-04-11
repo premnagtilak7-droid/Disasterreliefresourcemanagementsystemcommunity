@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { User } from './AuthSystem';
 import { submitSOS } from '@/lib/alerts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -19,8 +19,16 @@ import {
   Heart,
   Home,
   Zap,
-  CheckCircle
+  CheckCircle,
+  Camera,
+  Upload,
+  Loader2,
+  X
 } from 'lucide-react';
+import { storage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { analyzeAndUpdateAlert } from '@/lib/gemini';
+import { toast } from 'sonner';
 
 interface AidRequestFormProps {
   user: User;
@@ -57,14 +65,65 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPhotoFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhotoPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const removePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
+
+  const uploadPhoto = async (alertId: string): Promise<string | null> => {
+    if (!photoFile) return null;
+    
+    try {
+      setIsUploadingPhoto(true);
+      const storageRef = ref(storage, `alerts/${alertId}/${Date.now()}_${photoFile.name}`);
+      await uploadBytes(storageRef, photoFile);
+      const downloadURL = await getDownloadURL(storageRef);
+      return downloadURL;
+    } catch (error) {
+      console.error('Photo upload error:', error);
+      return null;
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
     try {
-      // Submit SOS alert to Firebase with GPS coordinates
-      await submitSOS({
+      // Generate a temporary alertId for photo upload
+      const tempAlertId = `alert_${Date.now()}`;
+      
+      // Upload photo first if exists
+      let photoURL: string | null = null;
+      if (photoFile) {
+        toast.loading('Uploading photo...');
+        photoURL = await uploadPhoto(tempAlertId);
+      }
+      
+      // Submit SOS alert to Firebase with GPS coordinates and photo
+      const alertId = await submitSOS({
         name: user.name,
         phone: formData.contactPhone,
         location: formData.location,
@@ -72,7 +131,15 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         description: formData.description,
         latitude: coordinates?.latitude,
         longitude: coordinates?.longitude,
+        photoURL,
       });
+      
+      // If photo was uploaded, trigger Gemini Smart Vision analysis
+      if (photoURL && alertId) {
+        toast.loading('AI analyzing photo...');
+        await analyzeAndUpdateAlert(alertId, photoURL);
+        toast.success('Photo analyzed by AI');
+      }
       
       setIsSubmitted(true);
     } catch (error) {
@@ -270,6 +337,87 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                 required
               />
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Photo Upload Card */}
+        <Card className="border-blue-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Camera className="h-5 w-5" />
+              Upload Disaster Photo
+            </CardTitle>
+            <CardDescription>
+              Upload a photo of your situation. AI will analyze it to prioritize your request.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Hidden file inputs */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              onChange={handlePhotoSelect}
+              className="hidden"
+            />
+            <input
+              type="file"
+              ref={cameraInputRef}
+              accept="image/*"
+              capture="environment"
+              onChange={handlePhotoSelect}
+              className="hidden"
+            />
+
+            {photoPreview ? (
+              <div className="relative">
+                <img 
+                  src={photoPreview} 
+                  alt="Preview" 
+                  className="w-full h-48 object-cover rounded-lg border"
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  className="absolute top-2 right-2"
+                  onClick={removePhoto}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+                <Badge className="absolute bottom-2 left-2 bg-green-600">
+                  Photo Ready
+                </Badge>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-24 flex flex-col items-center justify-center gap-2"
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  <Camera className="h-8 w-8 text-blue-600" />
+                  <span>Take Photo</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-24 flex flex-col items-center justify-center gap-2"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="h-8 w-8 text-green-600" />
+                  <span>Upload Image</span>
+                </Button>
+              </div>
+            )}
+
+            {isUploadingPhoto && (
+              <div className="flex items-center justify-center gap-2 text-blue-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Uploading photo...</span>
+              </div>
+            )}
           </CardContent>
         </Card>
 

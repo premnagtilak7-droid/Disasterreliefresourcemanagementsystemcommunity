@@ -19,6 +19,7 @@ import {
 } from '@/lib/alerts';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Circle, Libraries } from '@react-google-maps/api';
 import { toast } from 'sonner';
+import { MissionSummary } from './MissionSummary';
 
 // Define libraries outside component to prevent re-renders
 const libraries: Libraries = ['places', 'geometry'];
@@ -46,9 +47,11 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
   const [selectedAlert, setSelectedAlert] = useState<AlertWithId | null>(null);
   const [isResolving, setIsResolving] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
+  const [activeMission, setActiveMission] = useState<AlertWithId | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
   const previousAlertIdsRef = useRef<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const watchIdRef = useRef<number | null>(null);
 
   // Initialize beep audio
   useEffect(() => {
@@ -75,9 +78,10 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     libraries,
   });
 
-  // Get user's current location
+  // Get user's current location with live tracking using watchPosition
   useEffect(() => {
     if (navigator.geolocation) {
+      // Initial position
       navigator.geolocation.getCurrentPosition(
         (position) => {
           setUserLocation({
@@ -92,10 +96,31 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
         },
         { enableHighAccuracy: true, timeout: 10000 }
       );
+
+      // Live tracking with watchPosition
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+        },
+        (error) => {
+          console.error('Watch location error:', error);
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+      );
     } else {
       setLocationError('Geolocation not supported. Using default location.');
       setUserLocation(defaultCenter);
     }
+
+    // Cleanup watchPosition on unmount
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
   }, []);
 
   // Play beep sound function
@@ -182,6 +207,16 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     mapRef.current = map;
   }, []);
 
+  const handleStartMission = (alert: AlertWithId) => {
+    setActiveMission(alert);
+    setSelectedAlert(null);
+  };
+
+  const handleMissionResolved = () => {
+    setActiveMission(null);
+    setSelectedAlert(null);
+  };
+
   const handleResolveAlert = async (alertId: string) => {
     setIsResolving(alertId);
     try {
@@ -217,6 +252,20 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
           <p className="text-muted-foreground">Loading map and detecting your location...</p>
         </div>
       </div>
+    );
+  }
+
+  // If there's an active mission, show mission summary
+  if (activeMission) {
+    return (
+      <MissionSummary
+        alert={activeMission}
+        volunteerId={userId || 'anonymous'}
+        volunteerName="Volunteer"
+        volunteerLocation={userLocation}
+        onClose={() => setActiveMission(null)}
+        onResolved={handleMissionResolved}
+      />
     );
   }
 
@@ -322,13 +371,23 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
                     <h3 className="font-semibold text-red-600">{selectedAlert.emergencyType}</h3>
                     <p className="text-sm mt-1">{selectedAlert.name}</p>
                     <p className="text-xs text-gray-600 mt-1">{selectedAlert.description}</p>
+                    {selectedAlert.photoURL && (
+                      <img src={selectedAlert.photoURL} alt="Scene" className="w-full h-16 object-cover mt-2 rounded" />
+                    )}
                     <div className="mt-2 flex gap-2">
+                      {selectedAlert.phone && (
+                        <a
+                          href={`tel:${selectedAlert.phone}`}
+                          className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                        >
+                          Call
+                        </a>
+                      )}
                       <button
-                        onClick={() => handleResolveAlert(selectedAlert.id)}
-                        disabled={isResolving === selectedAlert.id}
-                        className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 disabled:opacity-50"
+                        onClick={() => handleStartMission(selectedAlert)}
+                        className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
                       >
-                        {isResolving === selectedAlert.id ? 'Resolving...' : 'Resolve'}
+                        Start Mission
                       </button>
                     </div>
                   </div>

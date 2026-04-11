@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getStorage } from "firebase/storage";
 
 // Hardcoded Firebase Config for hackathon
 const firebaseConfig = {
@@ -26,5 +27,8 @@ export const db = getFirestore(app);
 
 // Initialize Firebase Auth
 export const auth = getAuth(app);
+
+// Initialize Firebase Storage
+export const storage = getStorage(app);
 
 export default app;

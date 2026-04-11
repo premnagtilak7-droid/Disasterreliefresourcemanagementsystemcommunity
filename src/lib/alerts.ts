@@ -21,11 +21,19 @@ export interface SOSAlert {
   description: string;
   latitude?: number;
   longitude?: number;
+  photoURL?: string | null;
 }
 
 export interface SOSAlertDocument extends SOSAlert {
   status: "pending" | "acknowledged" | "resolved";
   createdAt: ReturnType<typeof serverTimestamp>;
+  photoURL?: string | null;
+  visionAnalysis?: {
+    severity: number;
+    primaryNeed: string;
+    description: string;
+    urgentDetails?: string;
+  };
 }
 
 /**
@@ -118,6 +126,45 @@ export async function testFirebaseConnection(): Promise<string> {
  */
 export interface AlertWithId extends SOSAlertDocument {
   id: string;
+  resolverName?: string;
+  resolverId?: string;
+  resolvedAt?: ReturnType<typeof serverTimestamp>;
+}
+
+export interface RescueHistoryItem extends AlertWithId {
+  originalAlertId: string;
+}
+
+/**
+ * Subscribe to volunteer's rescue history in real-time
+ */
+export function subscribeToRescueHistory(
+  volunteerId: string,
+  callback: (history: RescueHistoryItem[]) => void
+): () => void {
+  const q = query(
+    collection(db, "rescueHistory"),
+    where("resolverId", "==", volunteerId)
+  );
+
+  const unsubscribe = onSnapshot(q, (querySnapshot) => {
+    const history: RescueHistoryItem[] = [];
+    querySnapshot.forEach((doc) => {
+      history.push({
+        id: doc.id,
+        ...doc.data(),
+      } as RescueHistoryItem);
+    });
+    // Sort by resolvedAt descending (most recent first)
+    history.sort((a, b) => {
+      const aTime = a.resolvedAt ? (a.resolvedAt as unknown as { seconds: number }).seconds : 0;
+      const bTime = b.resolvedAt ? (b.resolvedAt as unknown as { seconds: number }).seconds : 0;
+      return bTime - aTime;
+    });
+    callback(history);
+  });
+
+  return unsubscribe;
 }
 
 /**
