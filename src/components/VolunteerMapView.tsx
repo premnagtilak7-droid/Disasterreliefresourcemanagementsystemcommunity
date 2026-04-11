@@ -78,12 +78,41 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
 
   // Only load Google Maps if we have an API key
   const hasApiKey = !!import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  const [googleMapsError, setGoogleMapsError] = useState<string | null>(null);
   
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: hasApiKey ? import.meta.env.VITE_GOOGLE_MAPS_API_KEY : 'DUMMY_KEY',
     libraries,
     skipGoogleMapsApiJs: !hasApiKey, // Skip loading Google Maps API if no key
   });
+
+  // Handle Google Maps loading errors
+  useEffect(() => {
+    if (loadError) {
+      console.error('[v0] Google Maps load error:', loadError);
+      setGoogleMapsError('Failed to load Google Maps. Using free map instead.');
+      setUseLeaflet(true);
+    }
+  }, [loadError]);
+
+  // Detect Google Maps API errors (billing, API not enabled, etc.)
+  useEffect(() => {
+    if (!useLeaflet && isLoaded && !loadError) {
+      // Check for Google Maps authentication errors after a short delay
+      const checkGoogleMapsAuth = () => {
+        const errorDivs = document.querySelectorAll('.gm-err-container, .dismissButton');
+        if (errorDivs.length > 0) {
+          console.error('[v0] Google Maps authentication error detected');
+          setGoogleMapsError('Google Maps API key issue detected. Please check billing is enabled.');
+          toast.error('Google Maps API error. Switching to free map.', { duration: 5000 });
+          setUseLeaflet(true);
+        }
+      };
+      
+      const timeoutId = setTimeout(checkGoogleMapsAuth, 2000);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [useLeaflet, isLoaded, loadError]);
 
   // Get user's current location with live tracking using watchPosition
   useEffect(() => {
@@ -320,11 +349,14 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
                 </CardDescription>
               </div>
               {shouldUseLeaflet ? (
-                hasApiKey && (
+                hasApiKey && !googleMapsError && (
                   <Button 
                     variant="outline" 
                     size="sm"
-                    onClick={() => setUseLeaflet(false)}
+                    onClick={() => {
+                      setGoogleMapsError(null);
+                      setUseLeaflet(false);
+                    }}
                     className="text-xs"
                   >
                     Use Google Maps
