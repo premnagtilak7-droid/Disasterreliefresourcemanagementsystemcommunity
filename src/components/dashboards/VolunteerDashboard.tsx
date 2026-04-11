@@ -13,7 +13,7 @@ import {
   Star,
   Award
 } from 'lucide-react';
-import { MapView } from '../MapView';
+import { VolunteerMapView } from '../VolunteerMapView';
 import { mockVolunteerTasks, mockVolunteerAssignments } from '../constants/mockData';
 
 interface VolunteerDashboardProps {
@@ -24,7 +24,7 @@ interface VolunteerDashboardProps {
 
 export function VolunteerDashboard({ user, activeView, setActiveView }: VolunteerDashboardProps) {
   if (activeView === 'map') {
-    return <MapView role="volunteer" />;
+    return <VolunteerMapView />;
   }
 
   if (activeView === 'tasks') {

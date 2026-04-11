@@ -55,19 +55,23 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationLoading, setLocationLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
     try {
-      // Submit SOS alert to Firebase
+      // Submit SOS alert to Firebase with GPS coordinates
       await submitSOS({
         name: user.name,
         phone: formData.contactPhone,
         location: formData.location,
         emergencyType: formData.aidType,
         description: formData.description,
+        latitude: coordinates?.latitude,
+        longitude: coordinates?.longitude,
       });
       
       setIsSubmitted(true);
@@ -81,18 +85,26 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
 
   const handleLocationDetect = () => {
     if (navigator.geolocation) {
+      setLocationLoading(true);
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
+          setCoordinates({ latitude, longitude });
           setFormData(prev => ({ 
             ...prev, 
-            location: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` 
+            location: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}` 
           }));
+          setLocationLoading(false);
         },
         (error) => {
-          console.log('Location detection failed');
-        }
+          console.log('Location detection failed:', error);
+          setLocationLoading(false);
+          alert('Could not detect your location. Please enter it manually.');
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
       );
+    } else {
+      alert('Geolocation is not supported by your browser.');
     }
   };
 
@@ -240,9 +252,9 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                   onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
                   required
                 />
-                <Button type="button" variant="outline" onClick={handleLocationDetect}>
-                  <MapPin className="h-4 w-4 mr-1" />
-                  Detect
+                <Button type="button" variant="outline" onClick={handleLocationDetect} disabled={locationLoading}>
+                  <MapPin className={`h-4 w-4 mr-1 ${locationLoading ? 'animate-pulse' : ''}`} />
+                  {locationLoading ? 'Detecting...' : 'Detect GPS'}
                 </Button>
               </div>
             </div>

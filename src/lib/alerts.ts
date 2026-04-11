@@ -1,4 +1,14 @@
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { 
+  collection, 
+  addDoc, 
+  serverTimestamp, 
+  query, 
+  where, 
+  onSnapshot, 
+  updateDoc, 
+  doc, 
+  getCountFromServer 
+} from "firebase/firestore";
 import { db } from "./firebase";
 
 export interface SOSAlert {
@@ -57,4 +67,103 @@ export async function testFirebaseConnection(): Promise<string> {
     console.error("Error testing Firebase connection:", error);
     throw new Error("Failed to connect to Firebase.");
   }
+}
+
+/**
+ * Extended alert document with ID for fetched data
+ */
+export interface AlertWithId extends SOSAlertDocument {
+  id: string;
+}
+
+/**
+ * Subscribe to pending alerts in real-time
+ * @param callback - Function called with updated alerts array
+ * @returns Unsubscribe function
+ */
+export function subscribeToPendingAlerts(
+  callback: (alerts: AlertWithId[]) => void
+): () => void {
+  const q = query(
+    collection(db, "alerts"),
+    where("status", "==", "pending")
+  );
+
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    const alerts: AlertWithId[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as SOSAlertDocument;
+      alerts.push({ id: docSnap.id, ...data });
+    });
+    callback(alerts);
+  });
+
+  return unsubscribe;
+}
+
+/**
+ * Get count of pending alerts
+ * @returns Count of pending requests
+ */
+export async function getPendingAlertsCount(): Promise<number> {
+  const q = query(
+    collection(db, "alerts"),
+    where("status", "==", "pending")
+  );
+  const snapshot = await getCountFromServer(q);
+  return snapshot.data().count;
+}
+
+/**
+ * Get count of active volunteers (placeholder - returns from volunteers collection if exists)
+ * For now returns a static number since volunteers collection may not exist
+ */
+export async function getActiveVolunteersCount(): Promise<number> {
+  try {
+    const q = query(collection(db, "volunteers"));
+    const snapshot = await getCountFromServer(q);
+    return snapshot.data().count;
+  } catch {
+    return 0; // Collection doesn't exist yet
+  }
+}
+
+/**
+ * Resolve an alert by updating its status
+ * @param alertId - The document ID of the alert to resolve
+ */
+export async function resolveAlert(alertId: string): Promise<void> {
+  try {
+    const alertRef = doc(db, "alerts", alertId);
+    await updateDoc(alertRef, {
+      status: "resolved",
+      resolvedAt: serverTimestamp(),
+    });
+    console.log("ALERT RESOLVED SUCCESSFULLY");
+  } catch (error) {
+    console.error("Error resolving alert:", error);
+    throw new Error("Failed to resolve alert.");
+  }
+}
+
+/**
+ * Calculate distance between two coordinates in kilometers (Haversine formula)
+ */
+export function calculateDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371; // Earth's radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }

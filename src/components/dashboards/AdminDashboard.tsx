@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { User } from '../AuthSystem';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -15,9 +15,10 @@ import {
   Heart
 } from 'lucide-react';
 import { AnalyticsView } from '../AnalyticsView';
-import { MapView } from '../MapView';
+import { AdminMapView } from '../AdminMapView';
 import { VolunteerManagement } from '../VolunteerManagement';
 import { InventoryManagement } from '../InventoryManagement';
+import { getPendingAlertsCount, getActiveVolunteersCount } from '@/lib/alerts';
 
 interface AdminDashboardProps {
   user: User;
@@ -42,12 +43,34 @@ const mockData = {
 };
 
 export function AdminDashboard({ user, activeView, setActiveView }: AdminDashboardProps) {
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const [activeVolunteers, setActiveVolunteers] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchStats() {
+      try {
+        const [pendingCount, volunteersCount] = await Promise.all([
+          getPendingAlertsCount(),
+          getActiveVolunteersCount(),
+        ]);
+        setPendingRequests(pendingCount);
+        setActiveVolunteers(volunteersCount);
+      } catch (error) {
+        console.error("Error fetching stats:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchStats();
+  }, []);
+
   if (activeView === 'analytics') {
     return <AnalyticsView />;
   }
 
   if (activeView === 'map') {
-    return <MapView role="admin" />;
+    return <AdminMapView />;
   }
 
   if (activeView === 'volunteers') {
@@ -75,11 +98,13 @@ export function AdminDashboard({ user, activeView, setActiveView }: AdminDashboa
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockData.activeVolunteers}</div>
+            <div className="text-2xl font-bold">
+              {isLoading ? '...' : activeVolunteers}
+            </div>
             <p className="text-xs text-muted-foreground">
-              of {mockData.totalVolunteers} total
+              from Firestore
             </p>
-            <Progress value={(mockData.activeVolunteers / mockData.totalVolunteers) * 100} className="mt-2" />
+            <Progress value={activeVolunteers > 0 ? 100 : 0} className="mt-2" />
           </CardContent>
         </Card>
 
@@ -103,9 +128,11 @@ export function AdminDashboard({ user, activeView, setActiveView }: AdminDashboa
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{mockData.pendingRequests}</div>
+            <div className="text-2xl font-bold text-orange-600">
+              {isLoading ? '...' : pendingRequests}
+            </div>
             <p className="text-xs text-muted-foreground">
-              {mockData.completedRequests} completed today
+              Live from Firestore
             </p>
           </CardContent>
         </Card>
