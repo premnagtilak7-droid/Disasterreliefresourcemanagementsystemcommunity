@@ -17,7 +17,11 @@ import {
   resolveAlert, 
   AlertWithId 
 } from '@/lib/alerts';
-import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Libraries } from '@react-google-maps/api';
+import { toast } from 'sonner';
+
+// Define libraries outside component to prevent re-renders
+const libraries: Libraries = ['places', 'geometry'];
 
 const mapContainerStyle = {
   width: '100%',
@@ -39,14 +43,54 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
   const [isResolving, setIsResolving] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState(defaultCenter);
   const mapRef = useRef<google.maps.Map | null>(null);
+  const previousAlertIdsRef = useRef<Set<string>>(new Set());
+
+  // Play beep sound function
+  const playBeep = useCallback(() => {
+    try {
+      const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 880;
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (error) {
+      console.error('Audio playback error:', error);
+    }
+  }, []);
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    libraries,
   });
 
-  // Subscribe to all pending alerts from Firestore (real-time)
+  // Subscribe to all pending alerts from Firestore (real-time) with notifications
   useEffect(() => {
     const unsubscribe = subscribeToPendingAlerts((fetchedAlerts) => {
+      // Check for new alerts
+      const currentIds = new Set(fetchedAlerts.map(a => a.id));
+      const newAlerts = fetchedAlerts.filter(alert => !previousAlertIdsRef.current.has(alert.id));
+      
+      // Only notify if this isn't the initial load and there are new alerts
+      if (previousAlertIdsRef.current.size > 0 && newAlerts.length > 0) {
+        newAlerts.forEach(alert => {
+          playBeep();
+          toast.error(`NEW SOS: ${alert.emergencyType || 'Emergency'} reported!`, {
+            duration: 8000,
+            icon: '🚨',
+          });
+        });
+      }
+      
+      previousAlertIdsRef.current = currentIds;
       setAlerts(fetchedAlerts);
       
       // Center map on first alert if available
@@ -59,7 +103,7 @@ export function AdminMapView({ userId }: AdminMapViewProps) {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [playBeep]);
 
   const onMapLoad = useCallback((map: google.maps.Map) => {
     mapRef.current = map;

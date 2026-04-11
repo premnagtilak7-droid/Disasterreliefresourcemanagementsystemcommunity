@@ -17,7 +17,11 @@ import {
   calculateDistance,
   AlertWithId 
 } from '@/lib/alerts';
-import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Circle } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Circle, Libraries } from '@react-google-maps/api';
+import { toast } from 'sonner';
+
+// Define libraries outside component to prevent re-renders
+const libraries: Libraries = ['places', 'geometry'];
 
 const RADIUS_KM = 2; // 2km radius for nearby alerts
 
@@ -43,9 +47,32 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
   const [isResolving, setIsResolving] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
+  const previousAlertIdsRef = useRef<Set<string>>(new Set());
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Initialize beep audio
+  useEffect(() => {
+    // Create a beep sound using Web Audio API
+    const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    oscillator.frequency.value = 800;
+    oscillator.type = 'sine';
+    gainNode.gain.value = 0;
+    
+    audioRef.current = new Audio();
+    
+    return () => {
+      audioContext.close();
+    };
+  }, []);
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    libraries,
   });
 
   // Get user's current location
@@ -71,14 +98,64 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     }
   }, []);
 
-  // Subscribe to pending alerts from Firestore
+  // Play beep sound function
+  const playBeep = useCallback(() => {
+    try {
+      const audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 880;
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.5);
+    } catch (error) {
+      console.error('Audio playback error:', error);
+    }
+  }, []);
+
+  // Subscribe to pending alerts from Firestore with notification
   useEffect(() => {
     const unsubscribe = subscribeToPendingAlerts((fetchedAlerts) => {
+      // Check for new alerts
+      const currentIds = new Set(fetchedAlerts.map(a => a.id));
+      const newAlerts = fetchedAlerts.filter(alert => !previousAlertIdsRef.current.has(alert.id));
+      
+      // Only notify if this isn't the initial load and there are new alerts
+      if (previousAlertIdsRef.current.size > 0 && newAlerts.length > 0) {
+        newAlerts.forEach(alert => {
+          // Check if within 2km of user
+          if (userLocation && alert.latitude && alert.longitude) {
+            const distance = calculateDistance(
+              userLocation.lat,
+              userLocation.lng,
+              alert.latitude,
+              alert.longitude
+            );
+            
+            if (distance <= RADIUS_KM) {
+              playBeep();
+              toast.error(`NEW SOS: ${alert.emergencyType || 'Emergency'} reported within 2km!`, {
+                duration: 8000,
+                icon: '🚨',
+              });
+            }
+          }
+        });
+      }
+      
+      previousAlertIdsRef.current = currentIds;
       setAlerts(fetchedAlerts);
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [userLocation, playBeep]);
 
   // Filter alerts within 2km radius
   useEffect(() => {
