@@ -23,6 +23,11 @@ export interface UserDocument {
   email: string;
   name: string;
   role: UserRole;
+  phoneNumber?: string;
+  latitude?: number;
+  longitude?: number;
+  availableForRescue?: boolean;
+  lastLocationUpdate?: ReturnType<typeof serverTimestamp>;
   createdAt: ReturnType<typeof serverTimestamp>;
 }
 

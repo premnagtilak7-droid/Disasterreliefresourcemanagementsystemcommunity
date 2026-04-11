@@ -11,10 +11,14 @@ import {
   MapPin,
   Phone,
   Heart,
-  Loader2
+  Loader2,
+  PhoneOff,
+  Navigation
 } from 'lucide-react';
 import { AidRequestForm } from '../AidRequestForm';
 import { submitEmergencySOS, subscribeToPendingAlerts, AlertWithId } from '@/lib/alerts';
+import { subscribeToNearbyVolunteers, getCurrentLocation, NearbyVolunteer, getCityFromCoordinates } from '@/lib/geolocation';
+import { toast } from 'sonner';
 
 interface VictimDashboardProps {
   user: User;
@@ -25,44 +29,84 @@ interface VictimDashboardProps {
 export function VictimDashboard({ user, activeView, setActiveView }: VictimDashboardProps) {
   const [isSOSLoading, setIsSOSLoading] = useState(false);
   const [userAlerts, setUserAlerts] = useState<AlertWithId[]>([]);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [nearbyVolunteers, setNearbyVolunteers] = useState<NearbyVolunteer[]>([]);
+  const [cityName, setCityName] = useState<string>('Your Location');
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+
+  // Get current location and nearby volunteers
+  useEffect(() => {
+    async function initializeLocation() {
+      setIsLoadingLocation(true);
+      try {
+        const location = await getCurrentLocation();
+        setUserLocation({ lat: location.latitude, lng: location.longitude });
+        
+        // Get city name for localization
+        const city = await getCityFromCoordinates(location.latitude, location.longitude);
+        setCityName(city);
+      } catch (error) {
+        console.error('Location error:', error);
+        setCityName('Unable to detect location');
+      } finally {
+        setIsLoadingLocation(false);
+      }
+    }
+    initializeLocation();
+  }, []);
+
+  // Subscribe to nearby volunteers when location is available
+  useEffect(() => {
+    if (!userLocation) return;
+
+    const unsubscribe = subscribeToNearbyVolunteers(
+      userLocation.lat,
+      userLocation.lng,
+      2, // 2km radius
+      (volunteers) => {
+        setNearbyVolunteers(volunteers);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [userLocation]);
 
   // Subscribe to user's alerts
   useEffect(() => {
     const unsubscribe = subscribeToPendingAlerts((alerts) => {
-      // Filter alerts by current user (would need userId in alerts)
       setUserAlerts(alerts);
     });
     return () => unsubscribe();
   }, []);
 
   const handleEmergencySOS = async () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser');
+    if (!userLocation) {
+      alert('Please enable location services');
       return;
     }
 
     setIsSOSLoading(true);
     
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        try {
-          const { latitude, longitude } = position.coords;
-          await submitEmergencySOS(user.id, user.name, latitude, longitude);
-          alert('Emergency SOS sent! Help is on the way.');
-        } catch (error) {
-          console.error('SOS Error:', error);
-          alert('Failed to send SOS. Please try again.');
-        } finally {
-          setIsSOSLoading(false);
-        }
-      },
-      (error) => {
-        console.error('Location error:', error);
-        alert('Could not get your location. Please enable GPS and try again.');
-        setIsSOSLoading(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    try {
+      await submitEmergencySOS(user.id, user.name, userLocation.lat, userLocation.lng);
+      
+      // Route to nearest volunteer or helpline
+      if (nearbyVolunteers.length > 0) {
+        const closestVolunteer = nearbyVolunteers[0];
+        toast.loading('Connecting to nearest volunteer...');
+        // Call the volunteer
+        window.open(`tel:${closestVolunteer.phoneNumber}`);
+      } else {
+        toast.loading('Connecting to national helpline...');
+        // Call national helpline
+        window.open('tel:112');
+      }
+    } catch (error) {
+      console.error('SOS Error:', error);
+      alert('Failed to send SOS. Please try again.');
+    } finally {
+      setIsSOSLoading(false);
+    }
   };
 
   if (activeView === 'request') {
@@ -131,41 +175,109 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
       <div className="p-6 space-y-6 max-w-4xl mx-auto">
         <div>
           <h1 className="text-2xl font-semibold mb-2">Emergency Resources</h1>
-          <p className="text-muted-foreground">Contact emergency services and support</p>
+          <p className="text-muted-foreground">Contact emergency services and support - {cityName}</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Card>
+          {/* Emergency Services */}
+          <Card className="border-red-200">
             <CardContent className="p-6 text-center space-y-3">
-              <Phone className="h-8 w-8 text-red-600 mx-auto" />
+              <PhoneOff className="h-8 w-8 text-red-600 mx-auto" />
               <h3 className="font-medium">Emergency Services</h3>
-              <p className="text-2xl font-bold text-red-600">911</p>
+              <p className="text-2xl font-bold text-red-600">112</p>
               <p className="text-sm text-muted-foreground">Police, Fire, Medical Emergency</p>
+              <Button 
+                className="w-full mt-2"
+                onClick={() => window.open('tel:112')}
+              >
+                <Phone className="h-4 w-4 mr-2" />
+                Call Now
+              </Button>
             </CardContent>
           </Card>
 
-          <Card>
+          {/* Ambulance */}
+          <Card className="border-orange-200">
             <CardContent className="p-6 text-center space-y-3">
-              <AlertTriangle className="h-8 w-8 text-orange-600 mx-auto" />
-              <h3 className="font-medium">Disaster Relief Hotline</h3>
-              <p className="text-2xl font-bold text-orange-600">1-800-RELIEF-1</p>
-              <p className="text-sm text-muted-foreground">Aid coordination and support</p>
+              <Heart className="h-8 w-8 text-orange-600 mx-auto" />
+              <h3 className="font-medium">Ambulance Service</h3>
+              <p className="text-2xl font-bold text-orange-600">102</p>
+              <p className="text-sm text-muted-foreground">Medical Emergency & Ambulance</p>
+              <Button 
+                className="w-full mt-2"
+                variant="outline"
+                onClick={() => window.open('tel:102')}
+              >
+                <Phone className="h-4 w-4 mr-2" />
+                Call Now
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Women's Helpline */}
+          <Card className="border-pink-200">
+            <CardContent className="p-6 text-center space-y-3">
+              <AlertTriangle className="h-8 w-8 text-pink-600 mx-auto" />
+              <h3 className="font-medium">Women's Helpline</h3>
+              <p className="text-2xl font-bold text-pink-600">1091</p>
+              <p className="text-sm text-muted-foreground">Women in Distress Support</p>
+              <Button 
+                className="w-full mt-2"
+                variant="outline"
+                onClick={() => window.open('tel:1091')}
+              >
+                <Phone className="h-4 w-4 mr-2" />
+                Call Now
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* NDMA - National Disaster Management */}
+          <Card className="border-blue-200">
+            <CardContent className="p-6 text-center space-y-3">
+              <Navigation className="h-8 w-8 text-blue-600 mx-auto" />
+              <h3 className="font-medium">NDMA Helpline</h3>
+              <p className="text-2xl font-bold text-blue-600">011-26701728</p>
+              <p className="text-sm text-muted-foreground">Disaster Relief Coordination</p>
+              <Button 
+                className="w-full mt-2"
+                variant="outline"
+                onClick={() => window.open('tel:+91-11-26701728')}
+              >
+                <Phone className="h-4 w-4 mr-2" />
+                Call Now
+              </Button>
             </CardContent>
           </Card>
         </div>
 
-        <Card>
-          <CardContent className="p-6 text-center">
-            <MapPin className="h-10 w-10 text-blue-600 mx-auto mb-3" />
-            <h3 className="font-medium mb-2">Find Nearby Help</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Use the map view to locate volunteers and resources in your area
-            </p>
-            <Button onClick={() => setActiveView('dashboard')}>
-              Back to Dashboard
-            </Button>
+        <Card className="bg-blue-50 dark:bg-blue-950/30 border-blue-200">
+          <CardHeader>
+            <CardTitle>Quick Tips</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex gap-3">
+              <div className="text-blue-600 font-bold">1.</div>
+              <p className="text-sm">Always enable your location for emergency services to find you faster</p>
+            </div>
+            <div className="flex gap-3">
+              <div className="text-blue-600 font-bold">2.</div>
+              <p className="text-sm">Keep your phone charged during emergencies</p>
+            </div>
+            <div className="flex gap-3">
+              <div className="text-blue-600 font-bold">3.</div>
+              <p className="text-sm">Update your emergency contact information in Settings</p>
+            </div>
           </CardContent>
         </Card>
+
+        <Button 
+          className="w-full"
+          variant="outline"
+          onClick={() => setActiveView('dashboard')}
+        >
+          Back to Dashboard
+        </Button>
       </div>
     );
   }
@@ -186,46 +298,82 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
             <AlertTriangle className="h-5 w-5" />
             Emergency Actions
           </CardTitle>
+          <CardDescription className="text-xs text-red-600 dark:text-red-300">
+            Current location: {cityName}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* One-Tap Emergency SOS */}
+          {/* Dynamic Hero Button - Closest Volunteer or Helpline */}
           <Button 
-            className="w-full h-20 bg-red-600 hover:bg-red-700 text-white text-xl font-bold shadow-lg"
+            className="w-full h-20 bg-red-600 hover:bg-red-700 text-white text-xl font-bold shadow-lg animate-pulse"
             onClick={handleEmergencySOS}
-            disabled={isSOSLoading}
+            disabled={isSOSLoading || isLoadingLocation}
           >
             {isSOSLoading ? (
               <div className="flex items-center gap-3">
                 <Loader2 className="h-6 w-6 animate-spin" />
-                <span>Sending SOS...</span>
+                <span>Connecting...</span>
+              </div>
+            ) : nearbyVolunteers.length > 0 ? (
+              <div className="flex flex-col items-center gap-1">
+                <div className="flex items-center gap-2">
+                  <PhoneOff className="h-6 w-6" />
+                  <span>CALL NEAREST VOLUNTEER</span>
+                </div>
+                <div className="text-xs font-normal">
+                  {nearbyVolunteers[0].name} ({Math.round(nearbyVolunteers[0].distance)}m away)
+                </div>
               </div>
             ) : (
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="h-6 w-6" />
-                <span>EMERGENCY SOS</span>
+              <div className="flex flex-col items-center gap-1">
+                <div className="flex items-center gap-2">
+                  <PhoneOff className="h-6 w-6" />
+                  <span>CALL NATIONAL HELPLINE (112)</span>
+                </div>
+                <div className="text-xs font-normal">No volunteers nearby</div>
               </div>
             )}
           </Button>
-          <p className="text-xs text-red-700 dark:text-red-400 text-center">
-            One tap to send your location and request immediate help
-          </p>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Button variant="outline" className="h-14 border-red-300">
-              <div className="flex flex-col items-center">
-                <Phone className="h-5 w-5 mb-1" />
-                <span>Emergency Call</span>
+          {/* Nearby Rescuers List */}
+          {nearbyVolunteers.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-red-800 dark:text-red-300">Nearby Rescuers (Top 5)</p>
+              <div className="space-y-2">
+                {nearbyVolunteers.slice(0, 5).map((volunteer) => (
+                  <div key={volunteer.id} className="flex items-center justify-between p-3 border rounded-lg bg-white dark:bg-slate-950/50">
+                    <div className="flex-1">
+                      <p className="font-medium">{volunteer.name}</p>
+                      <p className="text-xs text-muted-foreground">{Math.round(volunteer.distance)}m away</p>
+                    </div>
+                    <Button 
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        toast.loading('Redirecting to dialer...');
+                        window.open(`tel:${volunteer.phoneNumber}`);
+                      }}
+                    >
+                      <Phone className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
               </div>
+            </div>
+          )}
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-4 border-t">
+            <Button variant="outline" className="h-12 border-red-300">
+              <PhoneOff className="h-5 w-5 mr-2" />
+              Quick SOS
             </Button>
             <Button 
               variant="outline" 
-              className="h-14 border-red-300"
+              className="h-12 border-red-300"
               onClick={() => setActiveView('request')}
             >
-              <div className="flex flex-col items-center">
-                <Package className="h-5 w-5 mb-1" />
-                <span>Detailed Request</span>
-              </div>
+              <Package className="h-5 w-5 mr-2" />
+              Detailed Request
             </Button>
           </div>
         </CardContent>

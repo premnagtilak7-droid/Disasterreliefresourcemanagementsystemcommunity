@@ -9,9 +9,11 @@ import {
   MapPin,
   AlertTriangle,
   Calendar,
-  Award
+  Award,
+  Settings
 } from 'lucide-react';
 import { VolunteerMapView } from '../VolunteerMapView';
+import { VolunteerSettings } from '../VolunteerSettings';
 import { getResolvedCountByVolunteer, subscribeToPendingAlerts } from '@/lib/alerts';
 
 interface VolunteerDashboardProps {
@@ -40,6 +42,10 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
     });
     return () => unsubscribe();
   }, []);
+
+  if (activeView === 'settings') {
+    return <VolunteerSettings user={user} />;
+  }
 
   if (activeView === 'map') {
     return <VolunteerMapView userId={user.id} />;
@@ -217,11 +223,11 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-col items-center text-center space-y-2">
-              <Award className="h-8 w-8 text-purple-600" />
-              <h3 className="font-medium">Training</h3>
-              <p className="text-sm text-muted-foreground">Skill development</p>
-              <Button size="sm" variant="outline">
-                View Courses
+              <Settings className="h-8 w-8 text-gray-600" />
+              <h3 className="font-medium">Settings</h3>
+              <p className="text-sm text-muted-foreground">Manage your profile</p>
+              <Button size="sm" variant="outline" onClick={() => setActiveView('settings')}>
+                Manage Settings
               </Button>
             </div>
           </CardContent>
