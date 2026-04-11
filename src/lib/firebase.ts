@@ -2,14 +2,14 @@ import { initializeApp, getApps, getApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
-// Hardcoded Firebase Config for hackathon - replace with your actual values
+// Hardcoded Firebase Config for hackathon
 const firebaseConfig = {
-  apiKey: "AIzaSyDOCAbC123dEf456GhI789jKl01-MnsadasO",
-  authDomain: "disaster-relief-app.firebaseapp.com",
-  projectId: "disaster-relief-app",
-  storageBucket: "disaster-relief-app.appspot.com",
-  messagingSenderId: "123456789012",
-  appId: "1:123456789012:web:abc123def456ghi789jkl",
+  apiKey: "AIzaSyDavULjoQSsrKM4ox77tTki3VAwFQLPRY",
+  authDomain: "relief-map-c4c06.firebaseapp.com",
+  projectId: "relief-map-c4c06",
+  storageBucket: "relief-map-c4c06.firebasestorage.app",
+  messagingSenderId: "981339164232",
+  appId: "1:981339164232:web:c42fb9812c38a81ca1927d",
 };
 
 // Initialize Firebase (prevent re-initialization)
