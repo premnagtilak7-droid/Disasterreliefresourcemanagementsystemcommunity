@@ -24,7 +24,6 @@ export const categoryColors = {
 
 export const roleColors = {
   admin: 'bg-red-100 text-red-800',
-  donor: 'bg-green-100 text-green-800',
   volunteer: 'bg-blue-100 text-blue-800',
   victim: 'bg-orange-100 text-orange-800',
 };
@@ -67,12 +66,6 @@ export const navigationItems = {
     { id: 'inventory', label: 'Inventory' },
     { id: 'map', label: 'Map View' },
   ],
-  donor: [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'donations', label: 'My Donations' },
-    { id: 'projects', label: 'Relief Projects' },
-    { id: 'impact', label: 'Impact Report' },
-  ],
   volunteer: [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'tasks', label: 'My Tasks' },
@@ -89,7 +82,6 @@ export const navigationItems = {
 
 export const roleDescriptions = {
   admin: 'Manage resources, volunteers, and system operations',
-  donor: 'Track donations and contribute to relief efforts',
   volunteer: 'Coordinate aid delivery and field operations',
   victim: 'Request assistance and track aid status',
 };

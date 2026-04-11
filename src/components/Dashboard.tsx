@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { User } from './AuthSystem';
 import { AdminDashboard } from './dashboards/AdminDashboard';
-import { DonorDashboard } from './dashboards/DonorDashboard';
 import { VolunteerDashboard } from './dashboards/VolunteerDashboard';
 import { VictimDashboard } from './dashboards/VictimDashboard';
 import { Header } from './Header';
@@ -19,8 +18,6 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     switch (user.role) {
       case 'admin':
         return <AdminDashboard user={user} activeView={activeView} setActiveView={setActiveView} />;
-      case 'donor':
-        return <DonorDashboard user={user} activeView={activeView} setActiveView={setActiveView} />;
       case 'volunteer':
         return <VolunteerDashboard user={user} activeView={activeView} setActiveView={setActiveView} />;
       case 'victim':

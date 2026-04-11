@@ -130,39 +130,42 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
     return (
       <div className="p-6 space-y-6 max-w-4xl mx-auto">
         <div>
-          <h1 className="text-2xl font-semibold mb-2">Available Resources</h1>
-          <p className="text-muted-foreground">Find nearby assistance centers and emergency contacts</p>
+          <h1 className="text-2xl font-semibold mb-2">Emergency Resources</h1>
+          <p className="text-muted-foreground">Contact emergency services and support</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {mockAvailableResources.map((resource, index) => (
-            <Card key={index}>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-2">
-                    <h3 className="font-medium">{resource.name}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {resource.location || resource.contact}
-                    </p>
-                  </div>
-                  <Badge variant={resource.available ? 'default' : 'destructive'}>
-                    {resource.available ? 'Available' : 'Unavailable'}
-                  </Badge>
-                </div>
-                <div className="flex space-x-2 mt-3">
-                  <Button size="sm">
-                    <MapPin className="h-4 w-4 mr-1" />
-                    Directions
-                  </Button>
-                  <Button size="sm" variant="outline">
-                    <Phone className="h-4 w-4 mr-1" />
-                    Contact
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+          <Card>
+            <CardContent className="p-6 text-center space-y-3">
+              <Phone className="h-8 w-8 text-red-600 mx-auto" />
+              <h3 className="font-medium">Emergency Services</h3>
+              <p className="text-2xl font-bold text-red-600">911</p>
+              <p className="text-sm text-muted-foreground">Police, Fire, Medical Emergency</p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6 text-center space-y-3">
+              <AlertTriangle className="h-8 w-8 text-orange-600 mx-auto" />
+              <h3 className="font-medium">Disaster Relief Hotline</h3>
+              <p className="text-2xl font-bold text-orange-600">1-800-RELIEF-1</p>
+              <p className="text-sm text-muted-foreground">Aid coordination and support</p>
+            </CardContent>
+          </Card>
         </div>
+
+        <Card>
+          <CardContent className="p-6 text-center">
+            <MapPin className="h-10 w-10 text-blue-600 mx-auto mb-3" />
+            <h3 className="font-medium mb-2">Find Nearby Help</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Use the map view to locate volunteers and resources in your area
+            </p>
+            <Button onClick={() => setActiveView('dashboard')}>
+              Back to Dashboard
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }

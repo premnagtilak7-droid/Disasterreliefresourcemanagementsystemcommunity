@@ -6,11 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ThemeToggle } from './ThemeToggle';
-import { UserCheck, Shield, Heart, Users, Eye, EyeOff } from 'lucide-react';
+import { UserCheck, Shield, Users, Eye, EyeOff } from 'lucide-react';
 import { roleDescriptions } from './constants/uiConstants';
 import { registerUser, loginUser } from '@/lib/users';
 
-export type UserRole = 'admin' | 'donor' | 'volunteer' | 'victim';
+export type UserRole = 'admin' | 'volunteer' | 'victim';
 
 export interface User {
   id: string;
@@ -25,7 +25,6 @@ interface AuthSystemProps {
 
 const roleIcons = {
   admin: Shield,
-  donor: Heart,
   volunteer: Users,
   victim: UserCheck,
 };

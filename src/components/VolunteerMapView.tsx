@@ -17,7 +17,7 @@ import {
   calculateDistance,
   AlertWithId 
 } from '@/lib/alerts';
-import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api';
+import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Circle } from '@react-google-maps/api';
 
 const RADIUS_KM = 2; // 2km radius for nearby alerts
 
@@ -189,6 +189,19 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
                 mapTypeControl: false,
               }}
             >
+              {/* 2km Radius Circle around volunteer location */}
+              <Circle
+                center={userLocation}
+                radius={RADIUS_KM * 1000} // Convert km to meters
+                options={{
+                  fillColor: '#3B82F6',
+                  fillOpacity: 0.1,
+                  strokeColor: '#3B82F6',
+                  strokeOpacity: 0.5,
+                  strokeWeight: 2,
+                }}
+              />
+
               {/* User location marker (blue) */}
               <Marker
                 position={userLocation}
