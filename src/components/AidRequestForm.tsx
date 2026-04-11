@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { analyzeAndUpdateAlert } from '@/lib/gemini';
+import { analyzeAndUpdateAlert, analyzeBase64Photo, VisionAnalysis } from '@/lib/gemini';
 import { toast } from 'sonner';
 
 interface AidRequestFormProps {
@@ -67,25 +67,91 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const [locationLoading, setLocationLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [compressedBase64, setCompressedBase64] = useState<string | null>(null);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [instantAnalysis, setInstantAnalysis] = useState<VisionAnalysis | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Compress image using canvas for faster Gemini analysis
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxSize = 800; // Max dimension
+          let { width, height } = img;
+          
+          if (width > height && width > maxSize) {
+            height = (height * maxSize) / width;
+            width = maxSize;
+          } else if (height > maxSize) {
+            width = (width * maxSize) / height;
+            height = maxSize;
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          // Get compressed base64 (JPEG at 70% quality)
+          const base64 = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(base64.split(',')[1]); // Remove data:image/jpeg;base64, prefix
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setPhotoFile(file);
+      setInstantAnalysis(null);
+      
+      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
         setPhotoPreview(reader.result as string);
       };
       reader.readAsDataURL(file);
+
+      // Compress and analyze with Gemini IMMEDIATELY (before Firebase upload)
+      try {
+        setIsAnalyzing(true);
+        toast.loading('AI analyzing photo...');
+        
+        const compressed = await compressImage(file);
+        setCompressedBase64(compressed);
+        
+        // Instant Gemini analysis with compressed image
+        const analysis = await analyzeBase64Photo(compressed);
+        setInstantAnalysis(analysis);
+        
+        if (analysis.isFalseAlarm) {
+          toast.error(`False Alarm Detected: ${analysis.falseAlarmReason || 'Not a disaster image'}`);
+        } else {
+          toast.success(`AI Analysis: Severity ${analysis.severity}/10 - ${analysis.primaryNeed}`);
+        }
+      } catch (error) {
+        console.error('Analysis error:', error);
+        toast.error('Could not analyze photo');
+      } finally {
+        setIsAnalyzing(false);
+      }
     }
   };
 
   const removePhoto = () => {
     setPhotoFile(null);
     setPhotoPreview(null);
+    setCompressedBase64(null);
+    setInstantAnalysis(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
@@ -109,6 +175,13 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Block submission if false alarm detected
+    if (instantAnalysis?.isFalseAlarm) {
+      toast.error('Cannot submit: Image detected as false alarm. Please upload a real disaster photo.');
+      return;
+    }
+    
     setIsSubmitting(true);
     
     try {
@@ -122,7 +195,7 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         photoURL = await uploadPhoto(tempAlertId);
       }
       
-      // Submit SOS alert to Firebase with GPS coordinates and photo
+      // Submit SOS alert to Firebase with GPS coordinates, photo, and instant analysis
       const alertId = await submitSOS({
         name: user.name,
         phone: formData.contactPhone,
@@ -134,14 +207,13 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         photoURL,
       });
       
-      // If photo was uploaded, trigger Gemini Smart Vision analysis
-      if (photoURL && alertId) {
-        toast.loading('AI analyzing photo...');
-        await analyzeAndUpdateAlert(alertId, photoURL);
-        toast.success('Photo analyzed by AI');
+      // If we have instant analysis, save it immediately
+      if (alertId && instantAnalysis) {
+        await analyzeAndUpdateAlert(alertId, photoURL || '');
       }
       
       setIsSubmitted(true);
+      toast.success('Request submitted successfully!');
     } catch (error) {
       console.error("Failed to submit SOS:", error);
       alert("Failed to submit request. Please try again.");
@@ -370,24 +442,76 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
             />
 
             {photoPreview ? (
-              <div className="relative">
-                <img 
-                  src={photoPreview} 
-                  alt="Preview" 
-                  className="w-full h-48 object-cover rounded-lg border"
-                />
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="destructive"
-                  className="absolute top-2 right-2"
-                  onClick={removePhoto}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-                <Badge className="absolute bottom-2 left-2 bg-green-600">
-                  Photo Ready
-                </Badge>
+              <div className="space-y-3">
+                <div className="relative">
+                  <img 
+                    src={photoPreview} 
+                    alt="Preview" 
+                    className={`w-full h-48 object-cover rounded-lg border ${
+                      instantAnalysis?.isFalseAlarm ? 'border-red-500 border-2' : ''
+                    }`}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    className="absolute top-2 right-2"
+                    onClick={removePhoto}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                  {isAnalyzing ? (
+                    <Badge className="absolute bottom-2 left-2 bg-blue-600">
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      Analyzing...
+                    </Badge>
+                  ) : instantAnalysis?.isFalseAlarm ? (
+                    <Badge className="absolute bottom-2 left-2 bg-red-600">
+                      False Alarm
+                    </Badge>
+                  ) : instantAnalysis ? (
+                    <Badge className="absolute bottom-2 left-2 bg-green-600">
+                      Verified - Severity {instantAnalysis.severity}/10
+                    </Badge>
+                  ) : (
+                    <Badge className="absolute bottom-2 left-2 bg-gray-600">
+                      Photo Ready
+                    </Badge>
+                  )}
+                </div>
+                
+                {/* AI Analysis Results */}
+                {instantAnalysis && (
+                  <div className={`p-3 rounded-lg ${
+                    instantAnalysis.isFalseAlarm 
+                      ? 'bg-red-100 dark:bg-red-950 border border-red-300' 
+                      : 'bg-green-100 dark:bg-green-950 border border-green-300'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      {instantAnalysis.isFalseAlarm ? (
+                        <AlertTriangle className="h-4 w-4 text-red-600" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                      )}
+                      <span className={`font-medium text-sm ${
+                        instantAnalysis.isFalseAlarm ? 'text-red-700' : 'text-green-700'
+                      }`}>
+                        AI Analysis Result
+                      </span>
+                    </div>
+                    {instantAnalysis.isFalseAlarm ? (
+                      <p className="text-sm text-red-600">
+                        {instantAnalysis.falseAlarmReason || 'This does not appear to be a disaster photo.'}
+                      </p>
+                    ) : (
+                      <div className="text-sm text-green-700 space-y-1">
+                        <p><strong>Severity:</strong> {instantAnalysis.severity}/10</p>
+                        <p><strong>Primary Need:</strong> {instantAnalysis.primaryNeed}</p>
+                        <p><strong>Description:</strong> {instantAnalysis.description}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-4">

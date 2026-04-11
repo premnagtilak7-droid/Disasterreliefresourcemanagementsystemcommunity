@@ -194,30 +194,46 @@ export function MissionSummary({
               className="w-full max-h-64 object-cover rounded-lg border"
             />
             {alert.visionAnalysis && (
-              <div className="grid grid-cols-2 gap-4 p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
-                <div>
-                  <p className="text-sm text-muted-foreground">AI Severity Score</p>
-                  <p className="text-2xl font-bold text-red-600">
-                    {alert.visionAnalysis.severity}/10
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Primary Need</p>
-                  <Badge variant="destructive">
-                    {alert.visionAnalysis.primaryNeed}
-                  </Badge>
-                </div>
-                <div className="col-span-2">
-                  <p className="text-sm text-muted-foreground">AI Analysis</p>
-                  <p className="text-sm">{alert.visionAnalysis.description}</p>
-                </div>
-                {alert.visionAnalysis.urgentDetails && (
-                  <div className="col-span-2">
-                    <p className="text-sm text-muted-foreground">Urgent Details</p>
-                    <p className="text-sm text-red-600 font-medium">
-                      {alert.visionAnalysis.urgentDetails}
+              <div className={`grid grid-cols-2 gap-4 p-4 rounded-lg ${
+                alert.visionAnalysis.isFalseAlarm 
+                  ? 'bg-red-50 dark:bg-red-950/30 border border-red-300' 
+                  : 'bg-blue-50 dark:bg-blue-950/30'
+              }`}>
+                {alert.visionAnalysis.isFalseAlarm ? (
+                  <div className="col-span-2 text-center py-4">
+                    <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+                    <p className="text-lg font-bold text-red-600">Possible False Alarm</p>
+                    <p className="text-sm text-red-500">
+                      {alert.visionAnalysis.falseAlarmReason || 'AI detected this may not be a real disaster'}
                     </p>
                   </div>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-sm text-muted-foreground">AI Severity Score</p>
+                      <p className="text-2xl font-bold text-red-600">
+                        {alert.visionAnalysis.severity}/10
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Primary Need</p>
+                      <Badge variant="destructive">
+                        {alert.visionAnalysis.primaryNeed}
+                      </Badge>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-sm text-muted-foreground">AI Analysis</p>
+                      <p className="text-sm">{alert.visionAnalysis.description}</p>
+                    </div>
+                    {alert.visionAnalysis.urgentDetails && (
+                      <div className="col-span-2">
+                        <p className="text-sm text-muted-foreground">Urgent Details</p>
+                        <p className="text-sm text-red-600 font-medium">
+                          {alert.visionAnalysis.urgentDetails}
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}

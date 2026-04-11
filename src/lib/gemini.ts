@@ -105,6 +105,8 @@ export interface VisionAnalysis {
   primaryNeed: "Medical" | "Rescue" | "Food" | "Shelter" | "Water" | "Other";
   description: string;
   urgentDetails?: string;
+  isFalseAlarm: boolean;
+  falseAlarmReason?: string;
 }
 
 /**
@@ -127,22 +129,30 @@ export async function analyzeDisasterPhoto(imageUrl: string): Promise<VisionAnal
       reader.readAsDataURL(blob);
     });
 
-    const prompt = `You are a disaster relief AI analyst. Analyze this disaster photo carefully.
+    const prompt = `You are a disaster relief AI analyst. FIRST determine if this is a REAL disaster photo or a FALSE ALARM.
+
+FALSE ALARM examples: restaurant menus, food photos, random screenshots, memes, selfies, irrelevant images.
+REAL DISASTER examples: floods, fires, collapsed buildings, injured people, damage, emergencies.
 
 Respond ONLY with a valid JSON object in this exact format (no markdown, no explanation):
 {
-  "severity": 1-10 (10 = most severe, 1 = least severe),
+  "isFalseAlarm": true/false,
+  "falseAlarmReason": "Explain why this is NOT a disaster (only if isFalseAlarm is true)",
+  "severity": 0-10 (0 = false alarm, 10 = most severe),
   "primaryNeed": "Medical" | "Rescue" | "Food" | "Shelter" | "Water" | "Other",
   "description": "Brief description of what you see (max 100 words)",
-  "urgentDetails": "Any critical details rescuers should know"
+  "urgentDetails": "Any critical details rescuers should know (or 'N/A - False Alarm')"
 }
 
-Severity Guidelines:
+If isFalseAlarm is true, set severity to 0.
+
+Severity Guidelines (for REAL disasters only):
 - 9-10: Life-threatening (collapsed structures, fire, flood, trapped people)
 - 7-8: Severe damage (major structural damage, injured visible)
 - 5-6: Moderate damage (partial damage, supplies needed)
 - 3-4: Minor damage (cosmetic damage, basic assistance)
-- 1-2: Minimal (precautionary assessment)`;
+- 1-2: Minimal (precautionary assessment)
+- 0: FALSE ALARM - Not a disaster image`;
 
     const result = await model.generateContent([
       prompt,
@@ -164,8 +174,13 @@ Severity Guidelines:
     const analysis = JSON.parse(jsonMatch[0]) as VisionAnalysis;
     
     // Validate
-    if (analysis.severity < 1 || analysis.severity > 10) {
+    if (analysis.severity < 0 || analysis.severity > 10) {
       analysis.severity = 5;
+    }
+    
+    // If false alarm, ensure severity is 0
+    if (analysis.isFalseAlarm) {
+      analysis.severity = 0;
     }
     
     const validNeeds = ["Medical", "Rescue", "Food", "Shelter", "Water", "Other"];
@@ -181,6 +196,67 @@ Severity Guidelines:
       primaryNeed: "Other",
       description: "Unable to analyze photo automatically",
       urgentDetails: "Manual assessment required",
+      isFalseAlarm: false,
+    };
+  }
+}
+
+/**
+ * Analyze a base64 image directly (for instant client-side analysis)
+ * This is faster than waiting for Firebase upload
+ */
+export async function analyzeBase64Photo(base64Data: string): Promise<VisionAnalysis> {
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const prompt = `You are a disaster relief AI analyst. FIRST determine if this is a REAL disaster photo or a FALSE ALARM.
+
+FALSE ALARM examples: restaurant menus, food photos, random screenshots, memes, selfies, irrelevant images.
+REAL DISASTER examples: floods, fires, collapsed buildings, injured people, damage, emergencies.
+
+Respond ONLY with a valid JSON object in this exact format (no markdown, no explanation):
+{
+  "isFalseAlarm": true/false,
+  "falseAlarmReason": "Explain why this is NOT a disaster (only if isFalseAlarm is true)",
+  "severity": 0-10 (0 = false alarm, 10 = most severe),
+  "primaryNeed": "Medical" | "Rescue" | "Food" | "Shelter" | "Water" | "Other",
+  "description": "Brief description of what you see (max 100 words)",
+  "urgentDetails": "Any critical details rescuers should know (or 'N/A - False Alarm')"
+}
+
+If isFalseAlarm is true, set severity to 0.`;
+
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          mimeType: "image/jpeg",
+          data: base64Data,
+        },
+      },
+    ]);
+
+    const responseText = result.response.text();
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    
+    if (!jsonMatch) {
+      throw new Error("Invalid response format from Gemini Vision");
+    }
+
+    const analysis = JSON.parse(jsonMatch[0]) as VisionAnalysis;
+    
+    if (analysis.isFalseAlarm) {
+      analysis.severity = 0;
+    }
+    
+    return analysis;
+  } catch (error) {
+    console.error("Gemini base64 analysis error:", error);
+    return {
+      severity: 5,
+      primaryNeed: "Other",
+      description: "Unable to analyze photo",
+      isFalseAlarm: false,
     };
   }
 }

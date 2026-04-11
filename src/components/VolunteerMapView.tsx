@@ -48,6 +48,7 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
   const [isResolving, setIsResolving] = useState<string | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [activeMission, setActiveMission] = useState<AlertWithId | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<google.maps.Map | null>(null);
   const previousAlertIdsRef = useRef<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -205,6 +206,11 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
 
   const onMapLoad = useCallback((map: google.maps.Map) => {
     mapRef.current = map;
+    
+    // Wait for map to be fully loaded before showing content
+    google.maps.event.addListenerOnce(map, 'idle', () => {
+      setMapReady(true);
+    });
   }, []);
 
   const handleStartMission = (alert: AlertWithId) => {
@@ -230,14 +236,34 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     }
   };
 
+  // Check if API key is missing
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    return (
+      <div className="p-6">
+        <Card className="border-yellow-200 bg-yellow-50 dark:bg-yellow-950/30">
+          <CardContent className="p-6 text-center">
+            <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-yellow-800 dark:text-yellow-300">Google Maps API Key Required</h3>
+            <p className="text-yellow-600 dark:text-yellow-400 text-sm mt-2">
+              Please set VITE_GOOGLE_MAPS_API_KEY in your environment variables.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (loadError) {
     return (
       <div className="p-6">
-        <Card className="border-red-200 bg-red-50">
+        <Card className="border-red-200 bg-red-50 dark:bg-red-950/30">
           <CardContent className="p-6 text-center">
             <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-red-800">Map Failed to Load</h3>
-            <p className="text-red-600">Please check your Google Maps API key configuration.</p>
+            <h3 className="text-lg font-medium text-red-800 dark:text-red-300">Map Failed to Load</h3>
+            <p className="text-red-600 dark:text-red-400 text-sm mt-2">
+              Please verify your Google Maps API key is valid and has the required APIs enabled (Maps JavaScript API).
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -304,7 +330,16 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
               Red markers indicate pending SOS alerts
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="relative">
+            {/* Loading overlay until map is ready */}
+            {!mapReady && (
+              <div className="absolute inset-0 bg-background/80 z-10 flex items-center justify-center rounded-lg">
+                <div className="text-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Initializing map...</p>
+                </div>
+              </div>
+            )}
             <GoogleMap
               mapContainerStyle={mapContainerStyle}
               center={userLocation}
@@ -313,6 +348,8 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
               options={{
                 streetViewControl: false,
                 mapTypeControl: false,
+                fullscreenControl: false,
+                zoomControl: true,
               }}
             >
               {/* 2km Radius Circle around volunteer location */}

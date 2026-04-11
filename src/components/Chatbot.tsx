@@ -73,11 +73,20 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
     }
   }, [isOpen, user]);
 
+  // Auto-scroll to newest message when messages change
   useEffect(() => {
     if (scrollAreaRef.current) {
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+      // Use setTimeout to ensure DOM has updated
+      setTimeout(() => {
+        const scrollContainer = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+        if (scrollContainer) {
+          scrollContainer.scrollTop = scrollContainer.scrollHeight;
+        } else if (scrollAreaRef.current) {
+          scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+        }
+      }, 100);
     }
-  }, [messages]);
+  }, [messages, isTyping]);
 
   const getWelcomeMessage = (): Message => {
     const userRole = user?.role || 'guest';

@@ -33,6 +33,8 @@ export interface SOSAlertDocument extends SOSAlert {
     primaryNeed: string;
     description: string;
     urgentDetails?: string;
+    isFalseAlarm?: boolean;
+    falseAlarmReason?: string;
   };
 }
 
