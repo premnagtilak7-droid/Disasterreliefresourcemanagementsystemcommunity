@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Badge } from './ui/badge';
-import { MapPin, Phone, CheckCircle } from 'lucide-react';
+import { MapPin, Phone, CheckCircle, ToggleLeft, Loader2, User, Mail, Save } from 'lucide-react';
 import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { startVolunteerTracking } from '@/lib/geolocation';
@@ -103,12 +103,52 @@ export function VolunteerSettings({ user }: VolunteerSettingsProps) {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-96">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+          <p className="text-muted-foreground">Loading settings...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="p-6 space-y-6 max-w-2xl">
+    <div className="p-6 space-y-6 max-w-2xl mx-auto">
       <div>
         <h1 className="text-2xl font-semibold mb-2">Volunteer Settings</h1>
         <p className="text-muted-foreground">Manage your rescue availability and contact information</p>
       </div>
+
+      {/* User Info Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <User className="h-5 w-5" />
+            Your Profile
+          </CardTitle>
+          <CardDescription>Your account information</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
+                <User className="h-4 w-4 text-muted-foreground" />
+                <span>{user.name}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
+                <Mail className="h-4 w-4 text-muted-foreground" />
+                <span>{user.email}</span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Phone Number Card */}
       <Card>
@@ -175,7 +215,7 @@ export function VolunteerSettings({ user }: VolunteerSettingsProps) {
               variant={isAvailable ? 'destructive' : 'default'}
               size="lg"
             >
-              <Toggle2 className="h-4 w-4 mr-2" />
+              <ToggleLeft className="h-4 w-4 mr-2" />
               {isAvailable ? 'Go Offline' : 'Go Online'}
             </Button>
           </div>

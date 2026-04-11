@@ -4,6 +4,9 @@ import {
   signOut,
   onAuthStateChanged,
   User as FirebaseUser,
+  GoogleAuthProvider,
+  signInWithPopup,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import {
   doc,
@@ -109,6 +112,69 @@ export async function loginUser(
   } catch (error: unknown) {
     console.error("Error logging in:", error);
     const errorMessage = error instanceof Error ? error.message : "Login failed";
+    throw new Error(errorMessage);
+  }
+}
+
+/**
+ * Sign in with Google
+ */
+export async function signInWithGoogle(role: UserRole = 'victim'): Promise<UserDocument> {
+  try {
+    const provider = new GoogleAuthProvider();
+    const result = await signInWithPopup(auth, provider);
+    const { uid, email, displayName } = result.user;
+
+    // Check if user already exists in Firestore
+    const userDocRef = doc(db, "users", uid);
+    const userDocSnap = await getDoc(userDocRef);
+
+    if (userDocSnap.exists()) {
+      // Return existing user
+      return userDocSnap.data() as UserDocument;
+    }
+
+    // Create new user document
+    const userDoc: UserDocument = {
+      uid,
+      email: email || '',
+      name: displayName || 'User',
+      role,
+      createdAt: serverTimestamp(),
+    };
+
+    await setDoc(userDocRef, userDoc);
+    console.log("GOOGLE USER REGISTERED SUCCESSFULLY");
+
+    // If registering as volunteer, also add to volunteers collection
+    if (role === "volunteer") {
+      await setDoc(doc(db, "volunteers", uid), {
+        uid,
+        email: email || '',
+        name: displayName || 'User',
+        status: "active",
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    return userDoc;
+  } catch (error: unknown) {
+    console.error("Error signing in with Google:", error);
+    const errorMessage = error instanceof Error ? error.message : "Google sign-in failed";
+    throw new Error(errorMessage);
+  }
+}
+
+/**
+ * Send password reset email
+ */
+export async function resetPassword(email: string): Promise<void> {
+  try {
+    await sendPasswordResetEmail(auth, email);
+    console.log("PASSWORD RESET EMAIL SENT");
+  } catch (error: unknown) {
+    console.error("Error sending reset email:", error);
+    const errorMessage = error instanceof Error ? error.message : "Failed to send reset email";
     throw new Error(errorMessage);
   }
 }
