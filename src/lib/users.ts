@@ -112,6 +112,34 @@ export async function loginUser(
     return userData;
   } catch (error: unknown) {
     console.error("Error logging in:", error);
+    
+    // Handle specific Firebase Auth error codes
+    const firebaseError = error as { code?: string; message?: string };
+    
+    if (firebaseError.code === 'auth/invalid-credential') {
+      throw new Error("Invalid email or password. Please check your credentials and try again.");
+    }
+    
+    if (firebaseError.code === 'auth/user-not-found') {
+      throw new Error("No account found with this email. Please sign up first.");
+    }
+    
+    if (firebaseError.code === 'auth/wrong-password') {
+      throw new Error("Incorrect password. Please try again or reset your password.");
+    }
+    
+    if (firebaseError.code === 'auth/too-many-requests') {
+      throw new Error("Too many failed attempts. Please try again later or reset your password.");
+    }
+    
+    if (firebaseError.code === 'auth/user-disabled') {
+      throw new Error("This account has been disabled. Please contact support.");
+    }
+    
+    if (firebaseError.code === 'auth/invalid-email') {
+      throw new Error("Invalid email address format.");
+    }
+    
     const errorMessage = error instanceof Error ? error.message : "Login failed";
     throw new Error(errorMessage);
   }

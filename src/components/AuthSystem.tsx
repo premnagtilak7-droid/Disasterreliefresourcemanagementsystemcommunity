@@ -66,6 +66,13 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Login failed';
       toast.error(errorMessage);
+      
+      // If it's an invalid credential error, suggest signing up
+      if (errorMessage.includes('Invalid email or password')) {
+        toast.info("Don't have an account? Switch to Sign Up to create one.", {
+          duration: 5000,
+        });
+      }
     } finally {
       setIsLoading(false);
     }
