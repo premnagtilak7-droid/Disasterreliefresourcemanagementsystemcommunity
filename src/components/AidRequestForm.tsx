@@ -68,87 +68,130 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [compressedBase64, setCompressedBase64] = useState<string | null>(null);
-  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [instantAnalysis, setInstantAnalysis] = useState<VisionAnalysis | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  // Compress image using canvas for faster Gemini analysis
-  const compressImage = (file: File): Promise<string> => {
-    return new Promise((resolve) => {
+  // Compress image using canvas (max width 1024px, quality 0.7)
+  const compressImage = (file: File): Promise<{ base64: string; blob: Blob }> => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const img = new Image();
+        img.crossOrigin = "anonymous";
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const maxSize = 800; // Max dimension
+          const maxWidth = 1024; // Max width as specified
           let { width, height } = img;
           
-          if (width > height && width > maxSize) {
-            height = (height * maxSize) / width;
-            width = maxSize;
-          } else if (height > maxSize) {
-            width = (width * maxSize) / height;
-            height = maxSize;
+          // Scale down if width exceeds maxWidth
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
           }
           
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
+          if (!ctx) {
+            reject(new Error('Could not get canvas context'));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
           
           // Get compressed base64 (JPEG at 70% quality)
           const base64 = canvas.toDataURL('image/jpeg', 0.7);
-          resolve(base64.split(',')[1]); // Remove data:image/jpeg;base64, prefix
+          
+          // Also create a blob for upload
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                resolve({ 
+                  base64: base64.split(',')[1], // Remove data:image/jpeg;base64, prefix
+                  blob 
+                });
+              } else {
+                reject(new Error('Could not create blob'));
+              }
+            },
+            'image/jpeg',
+            0.7
+          );
         };
+        img.onerror = () => reject(new Error('Could not load image'));
         img.src = e.target?.result as string;
       };
+      reader.onerror = () => reject(new Error('Could not read file'));
       reader.readAsDataURL(file);
     });
   };
 
+  // State for compressed blob ready for upload
+  const [compressedBlob, setCompressedBlob] = useState<Blob | null>(null);
+  const [uploadedPhotoURL, setUploadedPhotoURL] = useState<string | null>(null);
+  const [processingState, setProcessingState] = useState<'idle' | 'compressing' | 'uploading' | 'analyzing' | 'complete'>('idle');
+
   const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setPhotoFile(file);
-      setInstantAnalysis(null);
-      
-      // Create preview
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
 
-      // Compress and analyze with Gemini IMMEDIATELY (before Firebase upload)
-      try {
-        setIsAnalyzing(true);
-        toast.loading('AI analyzing photo...');
-        
-        const compressed = await compressImage(file);
-        setCompressedBase64(compressed);
-        
-        // Instant Gemini analysis with compressed image
-        const analysis = await analyzeBase64Photo(compressed);
-        setInstantAnalysis(analysis);
-        toast.dismiss();
-        
-        if (analysis.description?.includes('API key not configured')) {
-          toast.warning('AI analysis unavailable - photo will still be uploaded');
-        } else if (analysis.isFalseAlarm) {
-          toast.error(`False Alarm Detected: ${analysis.falseAlarmReason || 'Not a disaster image'}`);
-        } else if (analysis.description === 'Unable to analyze photo') {
-          toast.warning('AI could not analyze photo - manual review needed');
-        } else {
-          toast.success(`AI Analysis: Severity ${analysis.severity}/10 - ${analysis.primaryNeed}`);
-        }
-      } catch (error) {
-        console.error('Analysis error:', error);
-        toast.error('Could not analyze photo');
-      } finally {
-        setIsAnalyzing(false);
+    // Reset states
+    setPhotoFile(file);
+    setInstantAnalysis(null);
+    setUploadedPhotoURL(null);
+    setProcessingState('compressing');
+    
+    // Create preview immediately
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPhotoPreview(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+
+    try {
+      // Step 1: Compress image (max width 1024px, quality 0.7)
+      toast.loading('Processing image...');
+      const { base64, blob } = await compressImage(file);
+      setCompressedBase64(base64);
+      setCompressedBlob(blob);
+      
+      // Step 2: Auto-upload to Firebase Storage immediately
+      setProcessingState('uploading');
+      toast.dismiss();
+      toast.loading('Uploading image...');
+      
+      const tempAlertId = `temp_${Date.now()}`;
+      const storageRef = ref(storage, `alerts/${tempAlertId}/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, blob);
+      const downloadURL = await getDownloadURL(storageRef);
+      setUploadedPhotoURL(downloadURL);
+      
+      // Step 3: Trigger Gemini AI analysis automatically
+      setProcessingState('analyzing');
+      toast.dismiss();
+      toast.loading('AI analyzing photo...');
+      
+      const analysis = await analyzeBase64Photo(base64);
+      setInstantAnalysis(analysis);
+      
+      setProcessingState('complete');
+      toast.dismiss();
+      
+      // Show appropriate toast based on analysis result
+      if (analysis.description?.includes('API key not configured')) {
+        toast.warning('AI analysis unavailable - photo uploaded successfully');
+      } else if (analysis.isFalseAlarm) {
+        toast.error(`False Alarm Detected: ${analysis.falseAlarmReason || 'Not a disaster image'}`);
+      } else if (analysis.description === 'Unable to analyze photo') {
+        toast.warning('AI could not analyze photo - manual review needed');
+      } else {
+        toast.success(`AI Analysis: Severity ${analysis.severity}/10 - ${analysis.primaryNeed}`);
       }
+    } catch (error) {
+      console.error('Photo processing error:', error);
+      setProcessingState('idle');
+      toast.dismiss();
+      toast.error('Failed to process photo. Please try again.');
     }
   };
 
@@ -156,26 +199,17 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
     setPhotoFile(null);
     setPhotoPreview(null);
     setCompressedBase64(null);
+    setCompressedBlob(null);
     setInstantAnalysis(null);
+    setUploadedPhotoURL(null);
+    setProcessingState('idle');
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
-  const uploadPhoto = async (alertId: string): Promise<string | null> => {
-    if (!photoFile) return null;
-    
-    try {
-      setIsUploadingPhoto(true);
-      const storageRef = ref(storage, `alerts/${alertId}/${Date.now()}_${photoFile.name}`);
-      await uploadBytes(storageRef, photoFile);
-      const downloadURL = await getDownloadURL(storageRef);
-      return downloadURL;
-    } catch (error) {
-      console.error('Photo upload error:', error);
-      return null;
-    } finally {
-      setIsUploadingPhoto(false);
-    }
+  // Photo is now auto-uploaded on select, this returns the pre-uploaded URL
+  const getUploadedPhotoURL = (): string | null => {
+    return uploadedPhotoURL;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -187,18 +221,20 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
       return;
     }
     
+    // Block submission if photo is still processing
+    if (processingState !== 'idle' && processingState !== 'complete') {
+      toast.error('Please wait for photo processing to complete.');
+      return;
+    }
+    
     setIsSubmitting(true);
-    const tempAlertId = `alert_${Date.now()}`;
+    toast.loading('Submitting request...');
     
     try {
-      // Start photo upload in background (don't await yet)
-      let photoUploadPromise: Promise<string | null> = Promise.resolve(null);
-      if (photoFile) {
-        toast.loading('Submitting request...');
-        photoUploadPromise = uploadPhoto(tempAlertId);
-      }
+      // Photo is already uploaded - use the pre-uploaded URL
+      const photoURL = getUploadedPhotoURL();
       
-      // Submit SOS alert immediately with instant analysis data
+      // Submit SOS alert with photo URL and AI analysis already included
       const alertId = await submitSOS({
         name: user.name,
         phone: formData.contactPhone,
@@ -207,21 +243,20 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         description: formData.description,
         latitude: coordinates?.latitude,
         longitude: coordinates?.longitude,
-        photoURL: null, // Will update after upload completes
-        // Include instant analysis in the alert
+        photoURL: photoURL, // Use pre-uploaded photo URL
+        // Include Gemini analysis in the alert (already analyzed on upload)
         visionAnalysis: instantAnalysis ? {
           severity: instantAnalysis.severity,
           primaryNeed: instantAnalysis.primaryNeed,
           description: instantAnalysis.description,
+          urgentDetails: instantAnalysis.urgentDetails,
           isFalseAlarm: instantAnalysis.isFalseAlarm,
+          falseAlarmReason: instantAnalysis.falseAlarmReason,
         } : undefined,
       });
       
-      // Now wait for photo upload to complete in background
-      const photoURL = await photoUploadPromise;
-      
-      // Update alert with photo URL if upload succeeded
-      if (alertId && photoURL) {
+      // If we have a photo URL and alertId, update with full analysis (backup)
+      if (alertId && photoURL && instantAnalysis) {
         await analyzeAndUpdateAlert(alertId, photoURL);
       }
       
@@ -230,6 +265,7 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
       toast.success('Request submitted successfully!');
     } catch (error) {
       console.error("Failed to submit SOS:", error);
+      toast.dismiss();
       toast.error("Failed to submit request. Please try again.");
     } finally {
       setIsSubmitting(false);
@@ -474,10 +510,20 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                   >
                     <X className="h-4 w-4" />
                   </Button>
-                  {isAnalyzing ? (
+                  {processingState === 'compressing' ? (
+                    <Badge className="absolute bottom-2 left-2 bg-yellow-600">
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      Processing...
+                    </Badge>
+                  ) : processingState === 'uploading' ? (
                     <Badge className="absolute bottom-2 left-2 bg-blue-600">
                       <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                      Analyzing...
+                      Uploading...
+                    </Badge>
+                  ) : processingState === 'analyzing' ? (
+                    <Badge className="absolute bottom-2 left-2 bg-purple-600">
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      AI Analyzing...
                     </Badge>
                   ) : instantAnalysis?.isFalseAlarm ? (
                     <Badge className="absolute bottom-2 left-2 bg-red-600">
