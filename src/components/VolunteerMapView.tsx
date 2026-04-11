@@ -8,7 +8,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Phone,
-  User,
+  User as UserIcon,
   Loader2
 } from 'lucide-react';
 import { 
@@ -31,7 +31,11 @@ const defaultCenter = {
   lng: -74.0060,
 };
 
-export function VolunteerMapView() {
+interface VolunteerMapViewProps {
+  userId?: string;
+}
+
+export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [alerts, setAlerts] = useState<AlertWithId[]>([]);
   const [nearbyAlerts, setNearbyAlerts] = useState<AlertWithId[]>([]);
@@ -104,7 +108,7 @@ export function VolunteerMapView() {
   const handleResolveAlert = async (alertId: string) => {
     setIsResolving(alertId);
     try {
-      await resolveAlert(alertId);
+      await resolveAlert(alertId, userId);
       setSelectedAlert(null);
     } catch (error) {
       console.error('Failed to resolve alert:', error);
@@ -296,7 +300,7 @@ export function VolunteerMapView() {
                             </div>
                             <div className="mt-2 space-y-1">
                               <div className="flex items-center gap-2 text-sm">
-                                <User className="h-3 w-3" />
+                                <UserIcon className="h-3 w-3" />
                                 <span>{alert.name}</span>
                               </div>
                               <div className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -29,7 +29,11 @@ const defaultCenter = {
   lng: -74.0060,
 };
 
-export function AdminMapView() {
+interface AdminMapViewProps {
+  userId?: string;
+}
+
+export function AdminMapView({ userId }: AdminMapViewProps) {
   const [alerts, setAlerts] = useState<AlertWithId[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<AlertWithId | null>(null);
   const [isResolving, setIsResolving] = useState<string | null>(null);
@@ -64,7 +68,7 @@ export function AdminMapView() {
   const handleResolveAlert = async (alertId: string) => {
     setIsResolving(alertId);
     try {
-      await resolveAlert(alertId);
+      await resolveAlert(alertId, userId);
       setSelectedAlert(null);
       // The real-time subscription will automatically update the alerts list
     } catch (error) {

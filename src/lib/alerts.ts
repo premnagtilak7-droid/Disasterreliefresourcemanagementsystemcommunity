@@ -7,9 +7,11 @@ import {
   onSnapshot, 
   updateDoc, 
   doc, 
-  getCountFromServer 
+  getCountFromServer,
+  getDocs 
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { triageAndUpdateAlert } from "./gemini";
 
 export interface SOSAlert {
   name: string;
@@ -41,10 +43,52 @@ export async function submitSOS(alertData: SOSAlert): Promise<string> {
 
     const docRef = await addDoc(collection(db, "alerts"), alertDocument);
     console.log("DATA SENT SUCCESSFULLY");
+    
+    // Trigger AI triage in background
+    triageAndUpdateAlert(docRef.id, alertData.emergencyType, alertData.description);
+    
     return docRef.id;
   } catch (error) {
     console.error("Error submitting SOS alert:", error);
     throw new Error("Failed to submit SOS alert. Please try again.");
+  }
+}
+
+/**
+ * Submit emergency one-tap SOS alert with GPS coordinates
+ * No form required - immediate submission
+ */
+export async function submitEmergencySOS(
+  userId: string,
+  userName: string,
+  latitude: number,
+  longitude: number
+): Promise<string> {
+  try {
+    const alertDocument = {
+      name: userName,
+      phone: "Emergency SOS",
+      location: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`,
+      emergencyType: "Urgent",
+      description: "Emergency SOS - Immediate assistance required",
+      latitude,
+      longitude,
+      status: "pending" as const,
+      type: "Urgent",
+      userId,
+      createdAt: serverTimestamp(),
+    };
+
+    const docRef = await addDoc(collection(db, "alerts"), alertDocument);
+    console.log("EMERGENCY SOS SENT SUCCESSFULLY");
+    
+    // Trigger AI triage in background
+    triageAndUpdateAlert(docRef.id, "Urgent", "Emergency SOS - Immediate assistance required");
+    
+    return docRef.id;
+  } catch (error) {
+    console.error("Error submitting emergency SOS:", error);
+    throw new Error("Failed to send emergency SOS. Please try again.");
   }
 }
 
@@ -131,18 +175,37 @@ export async function getActiveVolunteersCount(): Promise<number> {
 /**
  * Resolve an alert by updating its status
  * @param alertId - The document ID of the alert to resolve
+ * @param resolverId - The UID of the volunteer/admin resolving the alert
  */
-export async function resolveAlert(alertId: string): Promise<void> {
+export async function resolveAlert(alertId: string, resolverId?: string): Promise<void> {
   try {
     const alertRef = doc(db, "alerts", alertId);
     await updateDoc(alertRef, {
       status: "resolved",
       resolvedAt: serverTimestamp(),
+      ...(resolverId && { resolverId }),
     });
     console.log("ALERT RESOLVED SUCCESSFULLY");
   } catch (error) {
     console.error("Error resolving alert:", error);
     throw new Error("Failed to resolve alert.");
+  }
+}
+
+/**
+ * Get count of alerts resolved by a specific volunteer
+ */
+export async function getResolvedCountByVolunteer(volunteerId: string): Promise<number> {
+  try {
+    const q = query(
+      collection(db, "alerts"),
+      where("status", "==", "resolved"),
+      where("resolverId", "==", volunteerId)
+    );
+    const snapshot = await getCountFromServer(q);
+    return snapshot.data().count;
+  } catch {
+    return 0;
   }
 }
 

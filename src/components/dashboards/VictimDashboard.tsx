@@ -1,9 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { User } from '../AuthSystem';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { Progress } from '../ui/progress';
 import { 
   AlertTriangle, 
   CheckCircle, 
@@ -11,11 +10,11 @@ import {
   Package,
   MapPin,
   Phone,
-  MessageSquare,
-  Heart
+  Heart,
+  Loader2
 } from 'lucide-react';
 import { AidRequestForm } from '../AidRequestForm';
-import { mockAidRequests, mockAvailableResources } from '../constants/mockData';
+import { submitEmergencySOS, subscribeToPendingAlerts, AlertWithId } from '@/lib/alerts';
 
 interface VictimDashboardProps {
   user: User;
@@ -24,6 +23,48 @@ interface VictimDashboardProps {
 }
 
 export function VictimDashboard({ user, activeView, setActiveView }: VictimDashboardProps) {
+  const [isSOSLoading, setIsSOSLoading] = useState(false);
+  const [userAlerts, setUserAlerts] = useState<AlertWithId[]>([]);
+
+  // Subscribe to user's alerts
+  useEffect(() => {
+    const unsubscribe = subscribeToPendingAlerts((alerts) => {
+      // Filter alerts by current user (would need userId in alerts)
+      setUserAlerts(alerts);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleEmergencySOS = async () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
+    }
+
+    setIsSOSLoading(true);
+    
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          await submitEmergencySOS(user.id, user.name, latitude, longitude);
+          alert('Emergency SOS sent! Help is on the way.');
+        } catch (error) {
+          console.error('SOS Error:', error);
+          alert('Failed to send SOS. Please try again.');
+        } finally {
+          setIsSOSLoading(false);
+        }
+      },
+      (error) => {
+        console.error('Location error:', error);
+        alert('Could not get your location. Please enable GPS and try again.');
+        setIsSOSLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
   if (activeView === 'request') {
     return <AidRequestForm user={user} />;
   }
@@ -37,71 +78,49 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
         </div>
 
         <div className="space-y-4">
-          {mockAidRequests.map((request) => (
-            <Card key={request.id}>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <CardTitle className="text-lg">{request.type} Request</CardTitle>
-                    <Badge variant={
-                      request.status === 'completed' ? 'default' :
-                      request.status === 'in_progress' ? 'secondary' : 'outline'
-                    }>
-                      {request.status.replace('_', ' ')}
-                    </Badge>
-                    <Badge variant={
-                      request.priority === 'high' ? 'destructive' :
-                      request.priority === 'medium' ? 'default' : 'secondary'
-                    }>
-                      {request.priority} priority
-                    </Badge>
-                  </div>
-                  <span className="text-sm text-muted-foreground">#{request.id}</span>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-sm font-medium">Submitted</p>
-                    <p className="text-sm text-muted-foreground">{request.submitted}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Assigned Team</p>
-                    <p className="text-sm text-muted-foreground">{request.assignedTeam}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">
-                      {request.status === 'completed' ? 'Completed' : 'Expected Response'}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {request.status === 'completed' ? request.completedDate : request.estimatedResponse}
-                    </p>
-                  </div>
-                </div>
-                
-                {request.status === 'in_progress' && (
-                  <div className="mt-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium">Progress</span>
-                      <span className="text-sm text-muted-foreground">75%</span>
-                    </div>
-                    <Progress value={75} />
-                  </div>
-                )}
-
-                <div className="flex space-x-2 mt-4">
-                  <Button size="sm" variant="outline">
-                    <MessageSquare className="h-4 w-4 mr-1" />
-                    Message Team
-                  </Button>
-                  <Button size="sm" variant="outline">
-                    <MapPin className="h-4 w-4 mr-1" />
-                    Track Location
-                  </Button>
-                </div>
+          {userAlerts.length === 0 ? (
+            <Card>
+              <CardContent className="p-8 text-center">
+                <CheckCircle className="h-12 w-12 mx-auto mb-4 text-green-500" />
+                <h3 className="text-lg font-medium">No Active Requests</h3>
+                <p className="text-muted-foreground mt-2">You have no pending aid requests.</p>
+                <Button className="mt-4" onClick={() => setActiveView('request')}>
+                  Submit New Request
+                </Button>
               </CardContent>
             </Card>
-          ))}
+          ) : (
+            userAlerts.map((alert) => (
+              <Card key={alert.id}>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <CardTitle className="text-lg">{alert.emergencyType} Request</CardTitle>
+                      <Badge variant={
+                        alert.status === 'resolved' ? 'default' :
+                        alert.status === 'acknowledged' ? 'secondary' : 'outline'
+                      }>
+                        {alert.status}
+                      </Badge>
+                    </div>
+                    <span className="text-sm text-muted-foreground">#{alert.id.slice(0, 8)}</span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm font-medium">Location</p>
+                      <p className="text-sm text-muted-foreground">{alert.location}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Description</p>
+                      <p className="text-sm text-muted-foreground">{alert.description}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
       </div>
     );
@@ -157,17 +176,39 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
         </p>
       </div>
 
-      {/* Emergency Actions */}
-      <Card className="border-red-200 bg-red-50">
+      {/* Emergency SOS Button */}
+      <Card className="border-red-300 bg-red-50 dark:bg-red-950/30">
         <CardHeader>
-          <CardTitle className="text-red-800 flex items-center gap-2">
+          <CardTitle className="text-red-800 dark:text-red-400 flex items-center gap-2">
             <AlertTriangle className="h-5 w-5" />
             Emergency Actions
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* One-Tap Emergency SOS */}
+          <Button 
+            className="w-full h-20 bg-red-600 hover:bg-red-700 text-white text-xl font-bold shadow-lg"
+            onClick={handleEmergencySOS}
+            disabled={isSOSLoading}
+          >
+            {isSOSLoading ? (
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <span>Sending SOS...</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-6 w-6" />
+                <span>EMERGENCY SOS</span>
+              </div>
+            )}
+          </Button>
+          <p className="text-xs text-red-700 dark:text-red-400 text-center">
+            One tap to send your location and request immediate help
+          </p>
+          
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Button className="h-16 bg-red-600 hover:bg-red-700">
+            <Button variant="outline" className="h-14 border-red-300">
               <div className="flex flex-col items-center">
                 <Phone className="h-5 w-5 mb-1" />
                 <span>Emergency Call</span>
@@ -175,12 +216,12 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
             </Button>
             <Button 
               variant="outline" 
-              className="h-16 border-red-300"
+              className="h-14 border-red-300"
               onClick={() => setActiveView('request')}
             >
               <div className="flex flex-col items-center">
-                <AlertTriangle className="h-5 w-5 mb-1" />
-                <span>Request Immediate Aid</span>
+                <Package className="h-5 w-5 mb-1" />
+                <span>Detailed Request</span>
               </div>
             </Button>
           </div>
@@ -195,26 +236,33 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
-            {mockAidRequests.map((request) => (
-              <div key={request.id} className="flex items-center justify-between p-3 border rounded-lg">
-                <div className="flex items-center space-x-3">
-                  {request.status === 'completed' ? (
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                  ) : (
-                    <Clock className="h-5 w-5 text-orange-600" />
-                  )}
-                  <div>
-                    <p className="font-medium">{request.type} Request</p>
-                    <p className="text-sm text-muted-foreground">
-                      {request.status === 'completed' ? 'Completed' : 'In Progress'}
-                    </p>
-                  </div>
-                </div>
-                <Badge variant={request.status === 'completed' ? 'default' : 'secondary'}>
-                  #{request.id}
-                </Badge>
+            {userAlerts.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground">
+                <CheckCircle className="h-8 w-8 mx-auto mb-2 text-green-500" />
+                <p>No active requests</p>
               </div>
-            ))}
+            ) : (
+              userAlerts.slice(0, 3).map((alert) => (
+                <div key={alert.id} className="flex items-center justify-between p-3 border rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    {alert.status === 'resolved' ? (
+                      <CheckCircle className="h-5 w-5 text-green-600" />
+                    ) : (
+                      <Clock className="h-5 w-5 text-orange-600" />
+                    )}
+                    <div>
+                      <p className="font-medium">{alert.emergencyType} Request</p>
+                      <p className="text-sm text-muted-foreground capitalize">
+                        {alert.status}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant={alert.status === 'resolved' ? 'default' : 'secondary'}>
+                    #{alert.id.slice(0, 6)}
+                  </Badge>
+                </div>
+              ))
+            )}
           </div>
           <Button 
             variant="outline" 
