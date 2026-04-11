@@ -26,6 +26,7 @@ export interface UserDocument {
   email: string;
   name: string;
   role: UserRole;
+  photoURL?: string;
   phoneNumber?: string;
   latitude?: number;
   longitude?: number;
@@ -120,49 +121,78 @@ export async function loginUser(
  * Sign in with Google
  */
 export async function signInWithGoogle(role: UserRole = 'victim'): Promise<UserDocument> {
-  try {
-    const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
-    const { uid, email, displayName } = result.user;
+  console.log("[v0] Starting Google sign-in with role:", role);
+  console.log("[v0] Auth domain:", auth.app.options.authDomain);
+  
+  const provider = new GoogleAuthProvider();
+  provider.addScope('email');
+  provider.addScope('profile');
+  
+  return signInWithPopup(auth, provider)
+    .then(async (result) => {
+      console.log("[v0] Google sign-in successful, user:", result.user.email);
+      const { uid, email, displayName, photoURL } = result.user;
 
-    // Check if user already exists in Firestore
-    const userDocRef = doc(db, "users", uid);
-    const userDocSnap = await getDoc(userDocRef);
+      // Check if user already exists in Firestore
+      const userDocRef = doc(db, "users", uid);
+      const userDocSnap = await getDoc(userDocRef);
 
-    if (userDocSnap.exists()) {
-      // Return existing user
-      return userDocSnap.data() as UserDocument;
-    }
+      if (userDocSnap.exists()) {
+        console.log("[v0] Existing user found in Firestore");
+        return userDocSnap.data() as UserDocument;
+      }
 
-    // Create new user document
-    const userDoc: UserDocument = {
-      uid,
-      email: email || '',
-      name: displayName || 'User',
-      role,
-      createdAt: serverTimestamp(),
-    };
-
-    await setDoc(userDocRef, userDoc);
-    console.log("GOOGLE USER REGISTERED SUCCESSFULLY");
-
-    // If registering as volunteer, also add to volunteers collection
-    if (role === "volunteer") {
-      await setDoc(doc(db, "volunteers", uid), {
+      // Create new user document with photoURL
+      console.log("[v0] Creating new user document for:", displayName);
+      const userDoc: UserDocument = {
         uid,
         email: email || '',
         name: displayName || 'User',
-        status: "active",
+        role,
+        photoURL: photoURL || '',
         createdAt: serverTimestamp(),
-      });
-    }
+      };
 
-    return userDoc;
-  } catch (error: unknown) {
-    console.error("Error signing in with Google:", error);
-    const errorMessage = error instanceof Error ? error.message : "Google sign-in failed";
-    throw new Error(errorMessage);
-  }
+      await setDoc(userDocRef, userDoc);
+      console.log("[v0] GOOGLE USER REGISTERED SUCCESSFULLY");
+
+      // If registering as volunteer, also add to volunteers collection
+      if (role === "volunteer") {
+        await setDoc(doc(db, "volunteers", uid), {
+          uid,
+          email: email || '',
+          name: displayName || 'User',
+          photoURL: photoURL || '',
+          status: "active",
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      return userDoc;
+    })
+    .catch((error) => {
+      // Detailed error logging for debugging
+      console.error("[v0] Google sign-in error code:", error.code);
+      console.error("[v0] Google sign-in error message:", error.message);
+      console.error("[v0] Full error object:", error);
+      
+      // Check for specific error types
+      if (error.code === 'auth/unauthorized-domain') {
+        console.error("[v0] UNAUTHORIZED DOMAIN - Add this domain to Firebase Console > Authentication > Settings > Authorized domains");
+        console.error("[v0] Current domain:", window.location.hostname);
+        throw new Error(`Domain not authorized: ${window.location.hostname}. Add it to Firebase Console > Authentication > Authorized domains`);
+      }
+      
+      if (error.code === 'auth/popup-closed-by-user') {
+        throw new Error('Sign-in cancelled');
+      }
+      
+      if (error.code === 'auth/popup-blocked') {
+        throw new Error('Popup was blocked. Please allow popups for this site.');
+      }
+      
+      throw new Error(error.message || "Google sign-in failed");
+    });
 }
 
 /**

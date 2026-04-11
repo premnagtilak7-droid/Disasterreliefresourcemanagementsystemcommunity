@@ -188,19 +188,17 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
     }
     
     setIsSubmitting(true);
+    const tempAlertId = `alert_${Date.now()}`;
     
     try {
-      // Generate a temporary alertId for photo upload
-      const tempAlertId = `alert_${Date.now()}`;
-      
-      // Upload photo first if exists
-      let photoURL: string | null = null;
+      // Start photo upload in background (don't await yet)
+      let photoUploadPromise: Promise<string | null> = Promise.resolve(null);
       if (photoFile) {
-        toast.loading('Uploading photo...');
-        photoURL = await uploadPhoto(tempAlertId);
+        toast.loading('Submitting request...');
+        photoUploadPromise = uploadPhoto(tempAlertId);
       }
       
-      // Submit SOS alert to Firebase with GPS coordinates, photo, and instant analysis
+      // Submit SOS alert immediately with instant analysis data
       const alertId = await submitSOS({
         name: user.name,
         phone: formData.contactPhone,
@@ -209,19 +207,30 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         description: formData.description,
         latitude: coordinates?.latitude,
         longitude: coordinates?.longitude,
-        photoURL,
+        photoURL: null, // Will update after upload completes
+        // Include instant analysis in the alert
+        visionAnalysis: instantAnalysis ? {
+          severity: instantAnalysis.severity,
+          primaryNeed: instantAnalysis.primaryNeed,
+          description: instantAnalysis.description,
+          isFalseAlarm: instantAnalysis.isFalseAlarm,
+        } : undefined,
       });
       
-      // If we have instant analysis, save it immediately
-      if (alertId && instantAnalysis) {
-        await analyzeAndUpdateAlert(alertId, photoURL || '');
+      // Now wait for photo upload to complete in background
+      const photoURL = await photoUploadPromise;
+      
+      // Update alert with photo URL if upload succeeded
+      if (alertId && photoURL) {
+        await analyzeAndUpdateAlert(alertId, photoURL);
       }
       
+      toast.dismiss();
       setIsSubmitted(true);
       toast.success('Request submitted successfully!');
     } catch (error) {
       console.error("Failed to submit SOS:", error);
-      alert("Failed to submit request. Please try again.");
+      toast.error("Failed to submit request. Please try again.");
     } finally {
       setIsSubmitting(false);
     }

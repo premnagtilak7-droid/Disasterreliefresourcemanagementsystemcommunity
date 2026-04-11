@@ -230,24 +230,22 @@ export async function analyzeBase64Photo(base64Data: string): Promise<VisionAnal
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // Use gemini-1.5-flash for fastest response
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        maxOutputTokens: 200, // Limit output for speed
+        temperature: 0.1, // Low temperature for consistent results
+      }
+    });
 
-    const prompt = `You are a disaster relief AI analyst. FIRST determine if this is a REAL disaster photo or a FALSE ALARM.
+    // Optimized short prompt for speed
+    const prompt = `Quickly categorize this image. Reply ONLY with JSON:
+{"isFalseAlarm":bool,"category":"Flood|Fire|Medical|Collapse|Irrelevant","severity":0-10,"description":"max 20 words"}
 
-FALSE ALARM examples: restaurant menus, food photos, random screenshots, memes, selfies, irrelevant images.
-REAL DISASTER examples: floods, fires, collapsed buildings, injured people, damage, emergencies.
-
-Respond ONLY with a valid JSON object in this exact format (no markdown, no explanation):
-{
-  "isFalseAlarm": true/false,
-  "falseAlarmReason": "Explain why this is NOT a disaster (only if isFalseAlarm is true)",
-  "severity": 0-10 (0 = false alarm, 10 = most severe),
-  "primaryNeed": "Medical" | "Rescue" | "Food" | "Shelter" | "Water" | "Other",
-  "description": "Brief description of what you see (max 100 words)",
-  "urgentDetails": "Any critical details rescuers should know (or 'N/A - False Alarm')"
-}
-
-If isFalseAlarm is true, set severity to 0.`;
+Rules:
+- Food photos, menus, selfies = Irrelevant, severity 0, isFalseAlarm true
+- Real disasters = appropriate category, severity 1-10 based on urgency`;
 
     const result = await model.generateContent([
       prompt,
@@ -266,11 +264,24 @@ If isFalseAlarm is true, set severity to 0.`;
       throw new Error("Invalid response format from Gemini Vision");
     }
 
-    const analysis = JSON.parse(jsonMatch[0]) as VisionAnalysis;
+    const parsed = JSON.parse(jsonMatch[0]);
     
-    if (analysis.isFalseAlarm) {
-      analysis.severity = 0;
-    }
+    // Map category to primaryNeed
+    const categoryToNeed: Record<string, string> = {
+      'Flood': 'Rescue',
+      'Fire': 'Rescue', 
+      'Medical': 'Medical',
+      'Collapse': 'Rescue',
+      'Irrelevant': 'Other'
+    };
+    
+    const analysis: VisionAnalysis = {
+      isFalseAlarm: parsed.isFalseAlarm || parsed.category === 'Irrelevant',
+      falseAlarmReason: parsed.isFalseAlarm ? parsed.description : undefined,
+      severity: parsed.isFalseAlarm ? 0 : (parsed.severity || 5),
+      primaryNeed: (categoryToNeed[parsed.category] || 'Other') as VisionAnalysis['primaryNeed'],
+      description: parsed.description || 'Analysis complete',
+    };
     
     return analysis;
   } catch (error) {

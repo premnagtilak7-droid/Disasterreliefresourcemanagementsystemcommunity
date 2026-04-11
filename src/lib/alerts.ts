@@ -22,6 +22,12 @@ export interface SOSAlert {
   latitude?: number;
   longitude?: number;
   photoURL?: string | null;
+  visionAnalysis?: {
+    severity: number;
+    primaryNeed: string;
+    description: string;
+    isFalseAlarm?: boolean;
+  };
 }
 
 export interface SOSAlertDocument extends SOSAlert {
