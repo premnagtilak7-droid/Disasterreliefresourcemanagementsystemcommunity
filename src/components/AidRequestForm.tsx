@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { User } from './AuthSystem';
+import { submitSOS } from '@/lib/alerts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -18,8 +19,16 @@ import {
   Heart,
   Home,
   Zap,
-  CheckCircle
+  CheckCircle,
+  Camera,
+  Upload,
+  Loader2,
+  X
 } from 'lucide-react';
+import { storage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { analyzeAndUpdateAlert, analyzeBase64Photo, VisionAnalysis } from '@/lib/gemini';
+import { toast } from 'sonner';
 
 interface AidRequestFormProps {
   user: User;
@@ -54,32 +63,201 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [coordinates, setCoordinates] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [compressedBase64, setCompressedBase64] = useState<string | null>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [instantAnalysis, setInstantAnalysis] = useState<VisionAnalysis | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // Compress image using canvas for faster Gemini analysis
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const maxSize = 800; // Max dimension
+          let { width, height } = img;
+          
+          if (width > height && width > maxSize) {
+            height = (height * maxSize) / width;
+            width = maxSize;
+          } else if (height > maxSize) {
+            width = (width * maxSize) / height;
+            height = maxSize;
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          // Get compressed base64 (JPEG at 70% quality)
+          const base64 = canvas.toDataURL('image/jpeg', 0.7);
+          resolve(base64.split(',')[1]); // Remove data:image/jpeg;base64, prefix
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handlePhotoSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setPhotoFile(file);
+      setInstantAnalysis(null);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPhotoPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+
+      // Compress and analyze with Gemini IMMEDIATELY (before Firebase upload)
+      try {
+        setIsAnalyzing(true);
+        toast.loading('AI analyzing photo...');
+        
+        const compressed = await compressImage(file);
+        setCompressedBase64(compressed);
+        
+        // Instant Gemini analysis with compressed image
+        const analysis = await analyzeBase64Photo(compressed);
+        setInstantAnalysis(analysis);
+        toast.dismiss();
+        
+        if (analysis.description?.includes('API key not configured')) {
+          toast.warning('AI analysis unavailable - photo will still be uploaded');
+        } else if (analysis.isFalseAlarm) {
+          toast.error(`False Alarm Detected: ${analysis.falseAlarmReason || 'Not a disaster image'}`);
+        } else if (analysis.description === 'Unable to analyze photo') {
+          toast.warning('AI could not analyze photo - manual review needed');
+        } else {
+          toast.success(`AI Analysis: Severity ${analysis.severity}/10 - ${analysis.primaryNeed}`);
+        }
+      } catch (error) {
+        console.error('Analysis error:', error);
+        toast.error('Could not analyze photo');
+      } finally {
+        setIsAnalyzing(false);
+      }
+    }
+  };
+
+  const removePhoto = () => {
+    setPhotoFile(null);
+    setPhotoPreview(null);
+    setCompressedBase64(null);
+    setInstantAnalysis(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
+  };
+
+  const uploadPhoto = async (alertId: string): Promise<string | null> => {
+    if (!photoFile) return null;
+    
+    try {
+      setIsUploadingPhoto(true);
+      const storageRef = ref(storage, `alerts/${alertId}/${Date.now()}_${photoFile.name}`);
+      await uploadBytes(storageRef, photoFile);
+      const downloadURL = await getDownloadURL(storageRef);
+      return downloadURL;
+    } catch (error) {
+      console.error('Photo upload error:', error);
+      return null;
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Block submission if false alarm detected
+    if (instantAnalysis?.isFalseAlarm) {
+      toast.error('Cannot submit: Image detected as false alarm. Please upload a real disaster photo.');
+      return;
+    }
+    
     setIsSubmitting(true);
+    const tempAlertId = `alert_${Date.now()}`;
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsSubmitted(true);
-    setIsSubmitting(false);
+    try {
+      // Start photo upload in background (don't await yet)
+      let photoUploadPromise: Promise<string | null> = Promise.resolve(null);
+      if (photoFile) {
+        toast.loading('Submitting request...');
+        photoUploadPromise = uploadPhoto(tempAlertId);
+      }
+      
+      // Submit SOS alert immediately with instant analysis data
+      const alertId = await submitSOS({
+        name: user.name,
+        phone: formData.contactPhone,
+        location: formData.location,
+        emergencyType: formData.aidType,
+        description: formData.description,
+        latitude: coordinates?.latitude,
+        longitude: coordinates?.longitude,
+        photoURL: null, // Will update after upload completes
+        // Include instant analysis in the alert
+        visionAnalysis: instantAnalysis ? {
+          severity: instantAnalysis.severity,
+          primaryNeed: instantAnalysis.primaryNeed,
+          description: instantAnalysis.description,
+          isFalseAlarm: instantAnalysis.isFalseAlarm,
+        } : undefined,
+      });
+      
+      // Now wait for photo upload to complete in background
+      const photoURL = await photoUploadPromise;
+      
+      // Update alert with photo URL if upload succeeded
+      if (alertId && photoURL) {
+        await analyzeAndUpdateAlert(alertId, photoURL);
+      }
+      
+      toast.dismiss();
+      setIsSubmitted(true);
+      toast.success('Request submitted successfully!');
+    } catch (error) {
+      console.error("Failed to submit SOS:", error);
+      toast.error("Failed to submit request. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleLocationDetect = () => {
     if (navigator.geolocation) {
+      setLocationLoading(true);
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
+          setCoordinates({ latitude, longitude });
           setFormData(prev => ({ 
             ...prev, 
-            location: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` 
+            location: `${latitude.toFixed(6)}, ${longitude.toFixed(6)}` 
           }));
+          setLocationLoading(false);
         },
         (error) => {
-          console.log('Location detection failed');
-        }
+          console.log('Location detection failed:', error);
+          setLocationLoading(false);
+          alert('Could not detect your location. Please enter it manually.');
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
       );
+    } else {
+      alert('Geolocation is not supported by your browser.');
     }
   };
 
@@ -227,9 +405,9 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                   onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
                   required
                 />
-                <Button type="button" variant="outline" onClick={handleLocationDetect}>
-                  <MapPin className="h-4 w-4 mr-1" />
-                  Detect
+                <Button type="button" variant="outline" onClick={handleLocationDetect} disabled={locationLoading}>
+                  <MapPin className={`h-4 w-4 mr-1 ${locationLoading ? 'animate-pulse' : ''}`} />
+                  {locationLoading ? 'Detecting...' : 'Detect GPS'}
                 </Button>
               </div>
             </div>
@@ -245,6 +423,139 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                 required
               />
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Photo Upload Card */}
+        <Card className="border-blue-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Camera className="h-5 w-5" />
+              Upload Disaster Photo
+            </CardTitle>
+            <CardDescription>
+              Upload a photo of your situation. AI will analyze it to prioritize your request.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Hidden file inputs */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept="image/*"
+              onChange={handlePhotoSelect}
+              className="hidden"
+            />
+            <input
+              type="file"
+              ref={cameraInputRef}
+              accept="image/*"
+              capture="environment"
+              onChange={handlePhotoSelect}
+              className="hidden"
+            />
+
+            {photoPreview ? (
+              <div className="space-y-3">
+                <div className="relative">
+                  <img 
+                    src={photoPreview} 
+                    alt="Preview" 
+                    className={`w-full h-48 object-cover rounded-lg border ${
+                      instantAnalysis?.isFalseAlarm ? 'border-red-500 border-2' : ''
+                    }`}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="destructive"
+                    className="absolute top-2 right-2"
+                    onClick={removePhoto}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                  {isAnalyzing ? (
+                    <Badge className="absolute bottom-2 left-2 bg-blue-600">
+                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      Analyzing...
+                    </Badge>
+                  ) : instantAnalysis?.isFalseAlarm ? (
+                    <Badge className="absolute bottom-2 left-2 bg-red-600">
+                      False Alarm
+                    </Badge>
+                  ) : instantAnalysis ? (
+                    <Badge className="absolute bottom-2 left-2 bg-green-600">
+                      Verified - Severity {instantAnalysis.severity}/10
+                    </Badge>
+                  ) : (
+                    <Badge className="absolute bottom-2 left-2 bg-gray-600">
+                      Photo Ready
+                    </Badge>
+                  )}
+                </div>
+                
+                {/* AI Analysis Results */}
+                {instantAnalysis && (
+                  <div className={`p-3 rounded-lg ${
+                    instantAnalysis.isFalseAlarm 
+                      ? 'bg-red-100 dark:bg-red-950 border border-red-300' 
+                      : 'bg-green-100 dark:bg-green-950 border border-green-300'
+                  }`}>
+                    <div className="flex items-center gap-2 mb-2">
+                      {instantAnalysis.isFalseAlarm ? (
+                        <AlertTriangle className="h-4 w-4 text-red-600" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                      )}
+                      <span className={`font-medium text-sm ${
+                        instantAnalysis.isFalseAlarm ? 'text-red-700' : 'text-green-700'
+                      }`}>
+                        AI Analysis Result
+                      </span>
+                    </div>
+                    {instantAnalysis.isFalseAlarm ? (
+                      <p className="text-sm text-red-600">
+                        {instantAnalysis.falseAlarmReason || 'This does not appear to be a disaster photo.'}
+                      </p>
+                    ) : (
+                      <div className="text-sm text-green-700 space-y-1">
+                        <p><strong>Severity:</strong> {instantAnalysis.severity}/10</p>
+                        <p><strong>Primary Need:</strong> {instantAnalysis.primaryNeed}</p>
+                        <p><strong>Description:</strong> {instantAnalysis.description}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-24 flex flex-col items-center justify-center gap-2"
+                  onClick={() => cameraInputRef.current?.click()}
+                >
+                  <Camera className="h-8 w-8 text-blue-600" />
+                  <span>Take Photo</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-24 flex flex-col items-center justify-center gap-2"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="h-8 w-8 text-green-600" />
+                  <span>Upload Image</span>
+                </Button>
+              </div>
+            )}
+
+            {isUploadingPhoto && (
+              <div className="flex items-center justify-center gap-2 text-blue-600">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Uploading photo...</span>
+              </div>
+            )}
           </CardContent>
         </Card>
 

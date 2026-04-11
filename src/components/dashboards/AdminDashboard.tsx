@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { User } from '../AuthSystem';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -15,9 +15,11 @@ import {
   Heart
 } from 'lucide-react';
 import { AnalyticsView } from '../AnalyticsView';
-import { MapView } from '../MapView';
+import { AdminMapView } from '../AdminMapView';
 import { VolunteerManagement } from '../VolunteerManagement';
 import { InventoryManagement } from '../InventoryManagement';
+import { getPendingAlertsCount, getActiveVolunteersCount, subscribeToPendingAlerts, AlertWithId } from '@/lib/alerts';
+import { getTotalUserCount, getUserCountByRole } from '@/lib/users';
 
 interface AdminDashboardProps {
   user: User;
@@ -25,29 +27,46 @@ interface AdminDashboardProps {
   setActiveView: (view: string) => void;
 }
 
-const mockData = {
-  totalVolunteers: 245,
-  activeVolunteers: 189,
-  totalDonations: 125000,
-  pendingRequests: 23,
-  completedRequests: 156,
-  inventoryItems: 89,
-  criticalItems: 5,
-  recentActivity: [
-    { id: 1, type: 'donation', message: 'New donation of $5,000 received', time: '2 min ago', status: 'success' },
-    { id: 2, type: 'request', message: 'Emergency aid request from Zone-A', time: '5 min ago', status: 'urgent' },
-    { id: 3, type: 'volunteer', message: 'Volunteer team deployed to location', time: '12 min ago', status: 'info' },
-    { id: 4, type: 'inventory', message: 'Medical supplies restocked', time: '1 hour ago', status: 'success' },
-  ],
-};
-
 export function AdminDashboard({ user, activeView, setActiveView }: AdminDashboardProps) {
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const [activeVolunteers, setActiveVolunteers] = useState(0);
+  const [totalUsers, setTotalUsers] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch initial counts
+  useEffect(() => {
+    async function fetchStats() {
+      try {
+        const [volunteersCount, usersCount] = await Promise.all([
+          getActiveVolunteersCount(),
+          getTotalUserCount(),
+        ]);
+        setActiveVolunteers(volunteersCount);
+        setTotalUsers(usersCount);
+      } catch (error) {
+        console.error("Error fetching stats:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchStats();
+  }, []);
+
+  // Subscribe to real-time pending alerts count
+  useEffect(() => {
+    const unsubscribe = subscribeToPendingAlerts((alerts: AlertWithId[]) => {
+      setPendingRequests(alerts.length);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   if (activeView === 'analytics') {
     return <AnalyticsView />;
   }
 
   if (activeView === 'map') {
-    return <MapView role="admin" />;
+    return <AdminMapView userId={user.id} />;
   }
 
   if (activeView === 'volunteers') {
@@ -75,24 +94,27 @@ export function AdminDashboard({ user, activeView, setActiveView }: AdminDashboa
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockData.activeVolunteers}</div>
+            <div className="text-2xl font-bold">
+              {isLoading ? '...' : activeVolunteers}
+            </div>
             <p className="text-xs text-muted-foreground">
-              of {mockData.totalVolunteers} total
+              from Firestore
             </p>
-            <Progress value={(mockData.activeVolunteers / mockData.totalVolunteers) * 100} className="mt-2" />
+            <Progress value={activeVolunteers > 0 ? 100 : 0} className="mt-2" />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Donations</CardTitle>
+            <CardTitle className="text-sm font-medium">Total Users</CardTitle>
             <Heart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${mockData.totalDonations.toLocaleString()}</div>
-            <p className="text-xs text-green-600 flex items-center">
-              <TrendingUp className="h-3 w-3 mr-1" />
-              +12% from last week
+            <div className="text-2xl font-bold">
+              {isLoading ? '...' : totalUsers}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Registered in system
             </p>
           </CardContent>
         </Card>
@@ -103,55 +125,64 @@ export function AdminDashboard({ user, activeView, setActiveView }: AdminDashboa
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{mockData.pendingRequests}</div>
+            <div className="text-2xl font-bold text-orange-600">
+              {isLoading ? '...' : pendingRequests}
+            </div>
             <p className="text-xs text-muted-foreground">
-              {mockData.completedRequests} completed today
+              Live from Firestore
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Inventory Status</CardTitle>
+            <CardTitle className="text-sm font-medium">System Status</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{mockData.inventoryItems}</div>
-            <p className="text-xs text-red-600">
-              {mockData.criticalItems} critical items
+            <div className="text-2xl font-bold text-green-600">Online</div>
+            <p className="text-xs text-muted-foreground">
+              Real-time sync active
             </p>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Activity */}
+        {/* System Stats */}
         <Card>
           <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
-            <CardDescription>Latest system events and updates</CardDescription>
+            <CardTitle>System Overview</CardTitle>
+            <CardDescription>Real-time system statistics</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {mockData.recentActivity.map((activity) => (
-                <div key={activity.id} className="flex items-start space-x-3">
-                  <div className={`w-2 h-2 rounded-full mt-2 ${
-                    activity.status === 'success' ? 'bg-green-500' :
-                    activity.status === 'urgent' ? 'bg-red-500' :
-                    activity.status === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm">{activity.message}</p>
-                    <p className="text-xs text-muted-foreground">{activity.time}</p>
-                  </div>
-                  <Badge variant={
-                    activity.status === 'urgent' ? 'destructive' :
-                    activity.status === 'success' ? 'default' : 'secondary'
-                  } className="text-xs">
-                    {activity.status}
-                  </Badge>
+              <div className="flex items-start space-x-3">
+                <div className="w-2 h-2 rounded-full mt-2 bg-green-500" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm">Firebase Connected</p>
+                  <p className="text-xs text-muted-foreground">Real-time sync active</p>
                 </div>
-              ))}
+                <Badge variant="default" className="text-xs">active</Badge>
+              </div>
+              <div className="flex items-start space-x-3">
+                <div className={`w-2 h-2 rounded-full mt-2 ${pendingRequests > 0 ? 'bg-orange-500' : 'bg-green-500'}`} />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm">{pendingRequests} Pending Alerts</p>
+                  <p className="text-xs text-muted-foreground">Awaiting response</p>
+                </div>
+                <Badge variant={pendingRequests > 0 ? "destructive" : "secondary"} className="text-xs">
+                  {pendingRequests > 0 ? 'urgent' : 'clear'}
+                </Badge>
+              </div>
+              <div className="flex items-start space-x-3">
+                <div className="w-2 h-2 rounded-full mt-2 bg-blue-500" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm">{activeVolunteers} Active Volunteers</p>
+                  <p className="text-xs text-muted-foreground">Ready to respond</p>
+                </div>
+                <Badge variant="secondary" className="text-xs">info</Badge>
+              </div>
             </div>
           </CardContent>
         </Card>
