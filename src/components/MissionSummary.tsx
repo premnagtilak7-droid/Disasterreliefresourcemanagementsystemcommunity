@@ -69,6 +69,21 @@ export function MissionSummary({
   // AI Triage State
   const [aiTriage, setAiTriage] = useState<MissionTriageResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  // Loading guard - show spinner if alert data is incomplete
+  if (!alert || !alert.id) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <p className="text-muted-foreground">Loading mission details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Get imageUrl from either photoURL or imageUrl field (from alerts collection)
+  const imageUrl = alert.photoURL || (alert as unknown as { imageUrl?: string }).imageUrl || null;
   
   // Chat State
   const [chatMessages, setChatMessages] = useState<FirestoreChatMessage[]>([]);
@@ -91,11 +106,11 @@ export function MissionSummary({
   useEffect(() => {
     async function analyzePhoto() {
       // Check if we have an imageUrl that's a base64 string
-      const imageUrl = alert.photoURL || (alert as unknown as { imageUrl?: string }).imageUrl;
-      if (imageUrl && imageUrl.startsWith('data:image')) {
+      const photoUrl = alert?.photoURL || (alert as unknown as { imageUrl?: string })?.imageUrl;
+      if (photoUrl && photoUrl.startsWith('data:image')) {
         setIsAnalyzing(true);
         try {
-          const base64Data = imageUrl.split(',')[1];
+          const base64Data = photoUrl.split(',')[1];
           const triage = await analyzeMissionPhoto(base64Data);
           setAiTriage(triage);
         } catch (error) {
@@ -105,11 +120,15 @@ export function MissionSummary({
         }
       }
     }
-    analyzePhoto();
-  }, [alert]);
+    if (alert?.id) {
+      analyzePhoto();
+    }
+  }, [alert?.id, alert?.photoURL]);
 
   // Subscribe to real-time chat messages
   useEffect(() => {
+    if (!alert?.id) return;
+    
     const chatRef = collection(db, 'alerts', alert.id, 'messages');
     const q = query(chatRef, orderBy('timestamp', 'asc'));
 
@@ -127,11 +146,11 @@ export function MissionSummary({
     });
 
     return () => unsubscribe();
-  }, [alert.id]);
+  }, [alert?.id]);
 
   // Send chat message to victim
   const handleSendMessage = async () => {
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || !alert?.id) return;
     
     setIsSendingMessage(true);
     try {
@@ -163,9 +182,9 @@ export function MissionSummary({
 
     try {
       const response = await sendChatMessage(userMessage, aiChatMessages, {
-        location: alert.location,
-        emergencyType: alert.emergencyType,
-        description: alert.description,
+        location: alert?.location || 'Unknown',
+        emergencyType: alert?.emergencyType || 'General',
+        description: alert?.description || '',
       });
       setAiChatMessages(prev => [...prev, { role: 'assistant', content: response }]);
     } catch (error) {
@@ -181,7 +200,7 @@ export function MissionSummary({
 
   // Calculate directions when map is loaded
   useEffect(() => {
-    if (isLoaded && volunteerLocation && alert.latitude && alert.longitude) {
+    if (isLoaded && volunteerLocation && alert?.latitude && alert?.longitude) {
       const directionsService = new google.maps.DirectionsService();
       
       directionsService.route(
@@ -197,7 +216,7 @@ export function MissionSummary({
         }
       );
     }
-  }, [isLoaded, volunteerLocation, alert.latitude, alert.longitude]);
+  }, [isLoaded, volunteerLocation, alert?.latitude, alert?.longitude]);
 
   const handleResolve = async () => {
     setIsResolving(true);
@@ -215,13 +234,13 @@ export function MissionSummary({
   };
 
   const handleCall = () => {
-    if (alert.phone) {
+    if (alert?.phone) {
       window.location.href = `tel:${alert.phone}`;
     }
   };
 
   const handleNavigate = () => {
-    if (alert.latitude && alert.longitude) {
+    if (alert?.latitude && alert?.longitude) {
       window.open(
         `https://www.google.com/maps/dir/?api=1&destination=${alert.latitude},${alert.longitude}`,
         '_blank'
@@ -254,13 +273,13 @@ export function MissionSummary({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <p className="text-sm text-muted-foreground">Name</p>
-              <p className="text-lg font-semibold">{alert.name}</p>
+              <p className="text-lg font-semibold">{alert?.name || 'Unknown'}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Contact Number</p>
               <div className="flex items-center gap-2">
-                <p className="text-lg font-semibold">{alert.phone || 'Not provided'}</p>
-                {alert.phone && (
+                <p className="text-lg font-semibold">{alert?.phone || 'Not provided'}</p>
+                {alert?.phone && (
                   <Button size="sm" variant="outline" onClick={handleCall}>
                     <Phone className="h-4 w-4" />
                   </Button>
@@ -269,15 +288,31 @@ export function MissionSummary({
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Emergency Type</p>
-              <Badge variant="secondary">{alert.emergencyType || 'General'}</Badge>
+              <Badge variant="secondary">{alert?.emergencyType || 'General'}</Badge>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Location</p>
-              <p className="text-sm">{alert.location}</p>
+              <p className="text-sm text-muted-foreground">Location Address</p>
+              <p className="text-sm">{alert?.location || 'Location not specified'}</p>
+            </div>
+          </div>
+
+          {/* GPS Coordinates */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-3 bg-white dark:bg-slate-900 rounded-lg border">
+            <div>
+              <p className="text-sm text-muted-foreground">GPS Latitude</p>
+              <p className="text-lg font-mono font-semibold text-blue-600">
+                {alert?.latitude?.toFixed(6) || 'N/A'}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">GPS Longitude</p>
+              <p className="text-lg font-mono font-semibold text-blue-600">
+                {alert?.longitude?.toFixed(6) || 'N/A'}
+              </p>
             </div>
           </div>
           
-          {alert.description && (
+          {alert?.description && (
             <div>
               <p className="text-sm text-muted-foreground">Description</p>
               <p className="text-sm bg-white dark:bg-slate-900 p-3 rounded-lg border">
@@ -289,7 +324,7 @@ export function MissionSummary({
       </Card>
 
       {/* Photo & AI Analysis */}
-      {alert.photoURL && (
+      {imageUrl && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -299,22 +334,22 @@ export function MissionSummary({
           </CardHeader>
           <CardContent className="space-y-4">
             <img 
-              src={alert.photoURL} 
+              src={imageUrl} 
               alt="Disaster scene" 
               className="w-full max-h-64 object-cover rounded-lg border"
             />
-            {alert.visionAnalysis && (
+            {alert?.visionAnalysis && (
               <div className={`grid grid-cols-2 gap-4 p-4 rounded-lg ${
-                alert.visionAnalysis.isFalseAlarm 
+                alert.visionAnalysis?.isFalseAlarm 
                   ? 'bg-red-50 dark:bg-red-950/30 border border-red-300' 
                   : 'bg-blue-50 dark:bg-blue-950/30'
               }`}>
-                {alert.visionAnalysis.isFalseAlarm ? (
+                {alert.visionAnalysis?.isFalseAlarm ? (
                   <div className="col-span-2 text-center py-4">
                     <AlertTriangle className="h-8 w-8 text-red-500 mx-auto mb-2" />
                     <p className="text-lg font-bold text-red-600">Possible False Alarm</p>
                     <p className="text-sm text-red-500">
-                      {alert.visionAnalysis.falseAlarmReason || 'AI detected this may not be a real disaster'}
+                      {alert.visionAnalysis?.falseAlarmReason || 'AI detected this may not be a real disaster'}
                     </p>
                   </div>
                 ) : (
@@ -322,20 +357,20 @@ export function MissionSummary({
                     <div>
                       <p className="text-sm text-muted-foreground">AI Severity Score</p>
                       <p className="text-2xl font-bold text-red-600">
-                        {alert.visionAnalysis.severity}/10
+                        {alert.visionAnalysis?.severity}/10
                       </p>
                     </div>
                     <div>
                       <p className="text-sm text-muted-foreground">Primary Need</p>
                       <Badge variant="destructive">
-                        {alert.visionAnalysis.primaryNeed}
+                        {alert.visionAnalysis?.primaryNeed}
                       </Badge>
                     </div>
                     <div className="col-span-2">
                       <p className="text-sm text-muted-foreground">AI Analysis</p>
-                      <p className="text-sm">{alert.visionAnalysis.description}</p>
+                      <p className="text-sm">{alert.visionAnalysis?.description}</p>
                     </div>
-                    {alert.visionAnalysis.urgentDetails && (
+                    {alert.visionAnalysis?.urgentDetails && (
                       <div className="col-span-2">
                         <p className="text-sm text-muted-foreground">Urgent Details</p>
                         <p className="text-sm text-red-600 font-medium">
@@ -371,21 +406,21 @@ export function MissionSummary({
               <div className="flex items-center gap-4">
                 <div className="flex-1">
                   <p className="text-sm text-muted-foreground">Severity</p>
-                  <p className="text-2xl font-bold text-red-600">{aiTriage.severity}/10</p>
+                  <p className="text-2xl font-bold text-red-600">{aiTriage?.severity ?? 'N/A'}/10</p>
                 </div>
                 <div className="flex-1">
                   <p className="text-sm text-muted-foreground">Primary Need</p>
-                  <Badge variant="destructive">{aiTriage.primaryNeed}</Badge>
+                  <Badge variant="destructive">{aiTriage?.primaryNeed ?? 'Unknown'}</Badge>
                 </div>
                 <div className="flex-1">
                   <p className="text-sm text-muted-foreground">Est. Time</p>
-                  <p className="font-medium">{aiTriage.estimatedTimeToResolve}</p>
+                  <p className="font-medium">{aiTriage?.estimatedTimeToResolve ?? 'Unknown'}</p>
                 </div>
               </div>
               
               <div>
                 <p className="text-sm text-muted-foreground mb-2">Situation</p>
-                <p className="text-sm">{aiTriage.description}</p>
+                <p className="text-sm">{aiTriage?.description ?? 'No description available'}</p>
               </div>
 
               <div>
@@ -394,7 +429,7 @@ export function MissionSummary({
                   Required Equipment
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {aiTriage.requiredEquipment.map((item, idx) => (
+                  {(aiTriage?.requiredEquipment ?? []).map((item, idx) => (
                     <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-900">
                       {item}
                     </Badge>
@@ -408,7 +443,7 @@ export function MissionSummary({
                   Safety Warnings
                 </p>
                 <ul className="space-y-1">
-                  {aiTriage.safetyWarnings.map((warning, idx) => (
+                  {(aiTriage?.safetyWarnings ?? []).map((warning, idx) => (
                     <li key={idx} className="text-sm flex items-start gap-2">
                       <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
                       {warning}
