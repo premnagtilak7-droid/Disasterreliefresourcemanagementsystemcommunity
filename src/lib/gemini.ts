@@ -458,4 +458,3 @@ User: ${message}`;
     return "I apologize, but I'm having trouble responding right now. For immediate assistance, please call emergency services at 112.";
   }
 }
-
