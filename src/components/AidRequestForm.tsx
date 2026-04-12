@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import { User } from './AuthSystem';
-import { submitSOS } from '@/lib/alerts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -25,9 +24,10 @@ import {
   Loader2,
   X
 } from 'lucide-react';
-import { storage } from '@/lib/firebase';
+import { storage, db } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { analyzeAndUpdateAlert, analyzeBase64Photo, VisionAnalysis } from '@/lib/gemini';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { analyzeBase64Photo, VisionAnalysis } from '@/lib/gemini';
 import { toast } from 'sonner';
 
 interface AidRequestFormProps {
@@ -181,57 +181,73 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Block submission if false alarm detected
-    if (instantAnalysis?.isFalseAlarm) {
-      toast.error('Cannot submit: Image detected as false alarm. Please upload a real disaster photo.');
+    // RELAXED VALIDATION: Only Phone Number and Location are required
+    if (!formData.contactPhone.trim()) {
+      toast.error('Phone Number is required.');
+      return;
+    }
+    if (!formData.location.trim()) {
+      toast.error('Location is required.');
       return;
     }
     
     setIsSubmitting(true);
-    const tempAlertId = `alert_${Date.now()}`;
     
     try {
-      // Start photo upload in background (don't await yet)
-      let photoUploadPromise: Promise<string | null> = Promise.resolve(null);
-      if (photoFile) {
-        toast.loading('Submitting request...');
-        photoUploadPromise = uploadPhoto(tempAlertId);
+      toast.loading('Submitting request...');
+      
+      // CONDITIONAL BASE64 LOGIC: Only process photo if it exists
+      let imageUrl: string | null = null;
+      if (compressedBase64) {
+        // Use the already-compressed base64 string (smaller, faster)
+        imageUrl = `data:image/jpeg;base64,${compressedBase64}`;
       }
       
-      // Submit SOS alert immediately with instant analysis data
-      const alertId = await submitSOS({
-        name: user.name,
+      // Build special circumstances object
+      const specialCircumstances = {
+        hasDisabilities: formData.hasDisabilities,
+        hasChildren: formData.hasChildren,
+        hasElderly: formData.hasElderly,
+        additionalNeeds: formData.additionalNeeds || null,
+      };
+      
+      // DIRECT FIRESTORE WRITE to 'alerts' collection
+      const alertData = {
         phone: formData.contactPhone,
-        location: formData.location,
-        emergencyType: formData.aidType,
-        description: formData.description,
-        latitude: coordinates?.latitude,
-        longitude: coordinates?.longitude,
-        photoURL: null, // Will update after upload completes
-        // Include instant analysis in the alert
+        location: {
+          lat: coordinates?.latitude || null,
+          lng: coordinates?.longitude || null,
+          address: formData.location,
+        },
+        description: formData.description || null,
+        imageUrl: imageUrl,
+        specialCircumstances: specialCircumstances,
+        timestamp: serverTimestamp(),
+        // Additional fields for context
+        userName: user.name,
+        emergencyType: formData.aidType || null,
+        priority: formData.priority || null,
+        peopleCount: formData.peopleCount ? parseInt(formData.peopleCount) : null,
         visionAnalysis: instantAnalysis ? {
           severity: instantAnalysis.severity,
           primaryNeed: instantAnalysis.primaryNeed,
           description: instantAnalysis.description,
           isFalseAlarm: instantAnalysis.isFalseAlarm,
-        } : undefined,
-      });
+        } : null,
+      };
       
-      // Now wait for photo upload to complete in background
-      const photoURL = await photoUploadPromise;
-      
-      // Update alert with photo URL if upload succeeded
-      if (alertId && photoURL) {
-        await analyzeAndUpdateAlert(alertId, photoURL);
-      }
+      await addDoc(collection(db, 'alerts'), alertData);
       
       toast.dismiss();
       setIsSubmitted(true);
       toast.success('Request submitted successfully!');
     } catch (error) {
-      console.error("Failed to submit SOS:", error);
-      toast.error("Failed to submit request. Please try again.");
+      // DEBUGGING: Log the full error for permissions debugging
+      console.error('Firestore Error:', error);
+      toast.dismiss();
+      toast.error("Failed to submit request. Check console for details.");
     } finally {
+      // UI FEEDBACK: Always clear submitting state, even on error
       setIsSubmitting(false);
     }
   };
@@ -379,7 +395,6 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                   placeholder="e.g., 4"
                   value={formData.peopleCount}
                   onChange={(e) => setFormData(prev => ({ ...prev, peopleCount: e.target.value }))}
-                  required
                 />
               </div>
               <div>
@@ -420,7 +435,6 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                 value={formData.description}
                 onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                 rows={4}
-                required
               />
             </div>
           </CardContent>
