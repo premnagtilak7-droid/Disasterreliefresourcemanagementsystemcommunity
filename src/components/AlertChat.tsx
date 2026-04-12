@@ -33,7 +33,7 @@ export function AlertChat({ alertId, userId, userName, userRole, compact = false
 
   // Subscribe to real-time messages
   useEffect(() => {
-    const chatRef = collection(db, 'alerts', alertId, 'messages');
+    const chatRef = collection(db, 'emergency_alerts', alertId, 'messages');
     const q = query(chatRef, orderBy('timestamp', 'asc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -57,7 +57,7 @@ export function AlertChat({ alertId, userId, userName, userRole, compact = false
     
     setIsSending(true);
     try {
-      const chatRef = collection(db, 'alerts', alertId, 'messages');
+      const chatRef = collection(db, 'emergency_alerts', alertId, 'messages');
       await addDoc(chatRef, {
         senderId: userId,
         senderName: userName,

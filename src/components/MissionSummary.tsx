@@ -118,7 +118,7 @@ export function MissionSummary({
   useEffect(() => {
     if (!alert?.id) return;
     
-    const chatRef = collection(db, 'alerts', alert.id, 'messages');
+      const chatRef = collection(db, 'emergency_alerts', alert.id, 'messages');
     const q = query(chatRef, orderBy('timestamp', 'asc'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -145,7 +145,7 @@ export function MissionSummary({
     
     setIsSendingMessage(true);
     try {
-      const chatRef = collection(db, 'alerts', alert.id, 'messages');
+    const chatRef = collection(db, 'emergency_alerts', alert.id, 'messages');
       await addDoc(chatRef, {
         senderId: volunteerId,
         senderName: volunteerName,

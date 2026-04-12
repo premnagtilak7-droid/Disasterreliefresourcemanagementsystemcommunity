@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { AidRequestForm } from '../AidRequestForm';
 import { AlertChat } from '../AlertChat';
-import { submitEmergencySOS, subscribeToAllAlerts, AlertWithId } from '@/lib/alerts';
+import { submitEmergencySOS, subscribeToUserAlerts, AlertWithId } from '@/lib/alerts';
 import { subscribeToNearbyVolunteers, getCurrentLocation, NearbyVolunteer, getCityFromCoordinates } from '@/lib/geolocation';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
@@ -108,13 +108,13 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
     return () => unsubscribe();
   }, [userLocation]);
 
-  // Subscribe to ALL alerts in real-time (shows solved status instantly)
+  // Subscribe to user's own alerts in real-time (shows solved status instantly)
   useEffect(() => {
-    const unsubscribe = subscribeToAllAlerts((alerts) => {
+    const unsubscribe = subscribeToUserAlerts(user.id, (alerts) => {
       setUserAlerts(alerts);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user.id]);
 
   // Subscribe to real support groups from Firestore
   useEffect(() => {

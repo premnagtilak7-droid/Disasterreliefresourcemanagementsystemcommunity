@@ -211,23 +211,28 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         additionalNeeds: formData.additionalNeeds || null,
       };
       
-      // DIRECT FIRESTORE WRITE to 'alerts' collection
+      // DIRECT FIRESTORE WRITE to 'emergency_alerts' collection (unified collection)
       const alertData = {
+        // User identification for filtering
+        userId: user.id,
+        name: user.name,
         phone: formData.contactPhone,
-        location: {
-          lat: coordinates?.latitude || null,
-          lng: coordinates?.longitude || null,
-          address: formData.location,
-        },
+        // Location data with coordinates for 2km radius filtering
+        location: formData.location,
+        latitude: coordinates?.latitude || null,
+        longitude: coordinates?.longitude || null,
+        // Request details
         description: formData.description || null,
         imageUrl: imageUrl,
+        photoURL: imageUrl, // Also store as photoURL for compatibility
         specialCircumstances: specialCircumstances,
-        timestamp: serverTimestamp(),
+        // Status for workflow
+        status: 'pending',
+        createdAt: serverTimestamp(),
         // Additional fields for context
-        userName: user.name,
-        emergencyType: formData.aidType || null,
-        priority: formData.priority || null,
-        peopleCount: formData.peopleCount ? parseInt(formData.peopleCount) : null,
+        emergencyType: formData.aidType || 'General',
+        priority: formData.priority || 'medium',
+        peopleCount: formData.peopleCount ? parseInt(formData.peopleCount) : 1,
         visionAnalysis: instantAnalysis ? {
           severity: instantAnalysis.severity,
           primaryNeed: instantAnalysis.primaryNeed,
@@ -236,7 +241,7 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         } : null,
       };
       
-      await addDoc(collection(db, 'alerts'), alertData);
+      await addDoc(collection(db, 'emergency_alerts'), alertData);
       
       toast.dismiss();
       setIsSubmitted(true);

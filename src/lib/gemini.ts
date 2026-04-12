@@ -81,12 +81,13 @@ Priority Guidelines:
 export async function triageAndUpdateAlert(
   alertId: string,
   emergencyType: string,
-  description: string
+  description: string,
+  collectionName: string = "emergency_alerts"
 ): Promise<TriageResult> {
   const triageResult = await triageAlert(emergencyType, description);
   
   try {
-    const alertRef = doc(db, "alerts", alertId);
+    const alertRef = doc(db, collectionName, alertId);
     await updateDoc(alertRef, {
       aiTriage: triageResult,
       triageCategory: triageResult.category,
