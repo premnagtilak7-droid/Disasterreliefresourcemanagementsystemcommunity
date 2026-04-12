@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { Input } from './ui/input';
+import { ScrollArea } from './ui/scroll-area';
 import { 
   MapPin, 
   Phone, 
@@ -12,9 +14,17 @@ import {
   Clock,
   Camera,
   ArrowLeft,
-  Loader2
+  Loader2,
+  Package,
+  Shield,
+  Send,
+  MessageCircle,
+  Bot
 } from 'lucide-react';
 import { AlertWithId, completeAndArchiveMission } from '@/lib/alerts';
+import { analyzeMissionPhoto, MissionTriageResult, sendChatMessage, ChatMessage } from '@/lib/gemini';
+import { db } from '@/lib/firebase';
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { GoogleMap, useJsApiLoader, DirectionsRenderer, Marker, Libraries } from '@react-google-maps/api';
 
 import { toast } from 'sonner';
@@ -35,6 +45,16 @@ const mapContainerStyle = {
   height: '300px',
 };
 
+// Chat message interface for Firestore
+interface FirestoreChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRole: 'volunteer' | 'victim';
+  message: string;
+  timestamp: Timestamp;
+}
+
 export function MissionSummary({ 
   alert, 
   volunteerId, 
@@ -45,11 +65,119 @@ export function MissionSummary({
 }: MissionSummaryProps) {
   const [isResolving, setIsResolving] = useState(false);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
+  
+  // AI Triage State
+  const [aiTriage, setAiTriage] = useState<MissionTriageResult | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Chat State
+  const [chatMessages, setChatMessages] = useState<FirestoreChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // AI Chatbot State
+  const [aiChatMessages, setAiChatMessages] = useState<ChatMessage[]>([]);
+  const [aiChatInput, setAiChatInput] = useState('');
+  const [isAiResponding, setIsAiResponding] = useState(false);
+  const [showAiChat, setShowAiChat] = useState(false);
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
     libraries,
   });
+
+  // Analyze photo with AI when mission starts
+  useEffect(() => {
+    async function analyzePhoto() {
+      // Check if we have an imageUrl that's a base64 string
+      const imageUrl = alert.photoURL || (alert as unknown as { imageUrl?: string }).imageUrl;
+      if (imageUrl && imageUrl.startsWith('data:image')) {
+        setIsAnalyzing(true);
+        try {
+          const base64Data = imageUrl.split(',')[1];
+          const triage = await analyzeMissionPhoto(base64Data);
+          setAiTriage(triage);
+        } catch (error) {
+          console.error('Failed to analyze photo:', error);
+        } finally {
+          setIsAnalyzing(false);
+        }
+      }
+    }
+    analyzePhoto();
+  }, [alert]);
+
+  // Subscribe to real-time chat messages
+  useEffect(() => {
+    const chatRef = collection(db, 'alerts', alert.id, 'messages');
+    const q = query(chatRef, orderBy('timestamp', 'asc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const messages: FirestoreChatMessage[] = [];
+      snapshot.forEach((doc) => {
+        messages.push({ id: doc.id, ...doc.data() } as FirestoreChatMessage);
+      });
+      setChatMessages(messages);
+      
+      // Scroll to bottom when new messages arrive
+      setTimeout(() => {
+        chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+      }, 100);
+    });
+
+    return () => unsubscribe();
+  }, [alert.id]);
+
+  // Send chat message to victim
+  const handleSendMessage = async () => {
+    if (!newMessage.trim()) return;
+    
+    setIsSendingMessage(true);
+    try {
+      const chatRef = collection(db, 'alerts', alert.id, 'messages');
+      await addDoc(chatRef, {
+        senderId: volunteerId,
+        senderName: volunteerName,
+        senderRole: 'volunteer',
+        message: newMessage.trim(),
+        timestamp: serverTimestamp(),
+      });
+      setNewMessage('');
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      toast.error('Failed to send message');
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
+
+  // Handle AI chatbot message
+  const handleAiChat = async () => {
+    if (!aiChatInput.trim()) return;
+    
+    const userMessage = aiChatInput.trim();
+    setAiChatInput('');
+    setAiChatMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setIsAiResponding(true);
+
+    try {
+      const response = await sendChatMessage(userMessage, aiChatMessages, {
+        location: alert.location,
+        emergencyType: alert.emergencyType,
+        description: alert.description,
+      });
+      setAiChatMessages(prev => [...prev, { role: 'assistant', content: response }]);
+    } catch (error) {
+      console.error('AI chat error:', error);
+      setAiChatMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: 'Sorry, I encountered an error. For emergencies, call 112.' 
+      }]);
+    } finally {
+      setIsAiResponding(false);
+    }
+  };
 
   // Calculate directions when map is loaded
   useEffect(() => {
@@ -222,6 +350,223 @@ export function MissionSummary({
           </CardContent>
         </Card>
       )}
+
+{/* AI Mission Triage - Equipment Recommendations */}
+      <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/30">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
+            <Package className="h-5 w-5" />
+            AI Mission Triage
+          </CardTitle>
+          <CardDescription>Equipment and safety recommendations from AI</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isAnalyzing ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600 mr-3" />
+              <span>Analyzing situation...</span>
+            </div>
+          ) : aiTriage ? (
+            <div className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">Severity</p>
+                  <p className="text-2xl font-bold text-red-600">{aiTriage.severity}/10</p>
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">Primary Need</p>
+                  <Badge variant="destructive">{aiTriage.primaryNeed}</Badge>
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm text-muted-foreground">Est. Time</p>
+                  <p className="font-medium">{aiTriage.estimatedTimeToResolve}</p>
+                </div>
+              </div>
+              
+              <div>
+                <p className="text-sm text-muted-foreground mb-2">Situation</p>
+                <p className="text-sm">{aiTriage.description}</p>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2 flex items-center gap-1">
+                  <Package className="h-4 w-4" />
+                  Required Equipment
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {aiTriage.requiredEquipment.map((item, idx) => (
+                    <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-900">
+                      {item}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-amber-700 dark:text-amber-300 mb-2 flex items-center gap-1">
+                  <Shield className="h-4 w-4" />
+                  Safety Warnings
+                </p>
+                <ul className="space-y-1">
+                  {aiTriage.safetyWarnings.map((warning, idx) => (
+                    <li key={idx} className="text-sm flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                      {warning}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-4 text-muted-foreground">
+              <p>No photo available for AI analysis</p>
+              <p className="text-sm mt-1">Bring standard emergency kit</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Victim-Volunteer Chat */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageCircle className="h-5 w-5" />
+            Chat with Victim
+          </CardTitle>
+          <CardDescription>Real-time communication with the person in need</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="border rounded-lg bg-muted/30">
+            <ScrollArea className="h-48 p-3" ref={chatScrollRef}>
+              {chatMessages.length === 0 ? (
+                <div className="text-center text-muted-foreground py-8">
+                  <MessageCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No messages yet</p>
+                  <p className="text-xs">Send a message to coordinate with the victim</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {chatMessages.map((msg) => (
+                    <div 
+                      key={msg.id} 
+                      className={`flex ${msg.senderRole === 'volunteer' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div className={`max-w-[80%] rounded-lg px-3 py-2 ${
+                        msg.senderRole === 'volunteer' 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-white dark:bg-slate-800 border'
+                      }`}>
+                        <p className="text-xs opacity-70 mb-1">{msg.senderName}</p>
+                        <p className="text-sm">{msg.message}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+            <div className="p-3 border-t flex gap-2">
+              <Input
+                placeholder="Type a message..."
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                disabled={isSendingMessage}
+              />
+              <Button 
+                size="icon" 
+                onClick={handleSendMessage}
+                disabled={isSendingMessage || !newMessage.trim()}
+              >
+                {isSendingMessage ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* AI Disaster Assistant */}
+      <Card className="border-purple-200 bg-purple-50 dark:bg-purple-950/30">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-purple-800 dark:text-purple-300">
+              <Bot className="h-5 w-5" />
+              AI Disaster Assistant
+            </CardTitle>
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => setShowAiChat(!showAiChat)}
+            >
+              {showAiChat ? 'Minimize' : 'Expand'}
+            </Button>
+          </div>
+          <CardDescription>Get safety advice and guidance from AI</CardDescription>
+        </CardHeader>
+        {showAiChat && (
+          <CardContent>
+            <div className="border rounded-lg bg-white dark:bg-slate-900">
+              <ScrollArea className="h-48 p-3">
+                {aiChatMessages.length === 0 ? (
+                  <div className="text-center text-muted-foreground py-8">
+                    <Bot className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">AI Assistant Ready</p>
+                    <p className="text-xs">Ask for safety tips, first aid guidance, or coordination help</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {aiChatMessages.map((msg, idx) => (
+                      <div 
+                        key={idx} 
+                        className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div className={`max-w-[85%] rounded-lg px-3 py-2 ${
+                          msg.role === 'user' 
+                            ? 'bg-purple-600 text-white' 
+                            : 'bg-muted border'
+                        }`}>
+                          <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                        </div>
+                      </div>
+                    ))}
+                    {isAiResponding && (
+                      <div className="flex justify-start">
+                        <div className="bg-muted border rounded-lg px-3 py-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </ScrollArea>
+              <div className="p-3 border-t flex gap-2">
+                <Input
+                  placeholder="Ask the AI assistant..."
+                  value={aiChatInput}
+                  onChange={(e) => setAiChatInput(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleAiChat()}
+                  disabled={isAiResponding}
+                />
+                <Button 
+                  size="icon" 
+                  className="bg-purple-600 hover:bg-purple-700"
+                  onClick={handleAiChat}
+                  disabled={isAiResponding || !aiChatInput.trim()}
+                >
+                  {isAiResponding ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        )}
+      </Card>
 
       {/* Map & Directions */}
       <Card>

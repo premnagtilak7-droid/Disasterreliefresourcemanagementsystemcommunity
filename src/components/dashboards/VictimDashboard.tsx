@@ -19,8 +19,11 @@ import {
   Users
 } from 'lucide-react';
 import { AidRequestForm } from '../AidRequestForm';
+import { AlertChat } from '../AlertChat';
 import { submitEmergencySOS, subscribeToAllAlerts, AlertWithId } from '@/lib/alerts';
 import { subscribeToNearbyVolunteers, getCurrentLocation, NearbyVolunteer, getCityFromCoordinates } from '@/lib/geolocation';
+import { db } from '@/lib/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -36,31 +39,24 @@ interface VictimDashboardProps {
   setActiveView: (view: string) => void;
 }
 
-// Community Support Groups data
-const SUPPORT_GROUPS = [
+// Support Group interface for Firestore data
+interface SupportGroup {
+  id: string;
+  name: string;
+  description: string;
+  whatsappLink: string;
+  members: number;
+  isActive?: boolean;
+}
+
+// Fallback data when no Firestore groups exist
+const FALLBACK_SUPPORT_GROUPS: SupportGroup[] = [
   {
-    name: 'Disaster Relief Community',
-    description: 'General disaster relief coordination and support',
-    whatsappLink: 'https://wa.me/yourlink',
-    members: 1250,
-  },
-  {
-    name: 'Local Emergency Network',
-    description: 'Connect with neighbors during emergencies',
-    whatsappLink: 'https://wa.me/yourlink',
-    members: 458,
-  },
-  {
-    name: 'Medical Aid Support',
-    description: 'Medical emergencies and health assistance',
-    whatsappLink: 'https://wa.me/yourlink',
-    members: 892,
-  },
-  {
-    name: 'Food & Shelter Assistance',
-    description: 'Basic necessities and temporary housing help',
-    whatsappLink: 'https://wa.me/yourlink',
-    members: 634,
+    id: 'fallback-1',
+    name: 'Contact Local Authorities',
+    description: 'Reach out to your local emergency management office',
+    whatsappLink: 'tel:112',
+    members: 0,
   },
 ];
 
@@ -72,6 +68,8 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
   const [cityName, setCityName] = useState<string>('Your Location');
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [isSupportGroupsOpen, setIsSupportGroupsOpen] = useState(false);
+  const [supportGroups, setSupportGroups] = useState<SupportGroup[]>([]);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(true);
 
   // Get current location and nearby volunteers
   useEffect(() => {
@@ -115,6 +113,35 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
     const unsubscribe = subscribeToAllAlerts((alerts) => {
       setUserAlerts(alerts);
     });
+    return () => unsubscribe();
+  }, []);
+
+  // Subscribe to real support groups from Firestore
+  useEffect(() => {
+    const groupsRef = collection(db, 'supportGroups');
+    const unsubscribe = onSnapshot(groupsRef, (snapshot) => {
+      const groups: SupportGroup[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.isActive !== false) { // Include groups that are active or have no isActive field
+          groups.push({
+            id: doc.id,
+            name: data.name || 'Unnamed Group',
+            description: data.description || '',
+            whatsappLink: data.whatsappLink || '',
+            members: data.members || 0,
+            isActive: data.isActive,
+          });
+        }
+      });
+      setSupportGroups(groups.length > 0 ? groups : FALLBACK_SUPPORT_GROUPS);
+      setIsLoadingGroups(false);
+    }, (error) => {
+      console.error('Error fetching support groups:', error);
+      setSupportGroups(FALLBACK_SUPPORT_GROUPS);
+      setIsLoadingGroups(false);
+    });
+
     return () => unsubscribe();
   }, []);
 
@@ -193,25 +220,38 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm font-medium">Location</p>
-                      <p className="text-sm text-muted-foreground">{alert.location}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Description</p>
-                      <p className="text-sm text-muted-foreground">{alert.description}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      </div>
-    );
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div>
+  <p className="text-sm font-medium">Location</p>
+  <p className="text-sm text-muted-foreground">{alert.location}</p>
+  </div>
+  <div>
+  <p className="text-sm font-medium">Description</p>
+  <p className="text-sm text-muted-foreground">{alert.description}</p>
+  </div>
+  </div>
+  
+  {/* Real-time chat with volunteer - only show for pending alerts */}
+  {alert.status !== 'solved' && alert.status !== 'resolved' && (
+    <div className="mt-4 pt-4 border-t">
+      <AlertChat
+        alertId={alert.id}
+        userId={user.id}
+        userName={user.name}
+        userRole="victim"
+        compact
+      />
+    </div>
+  )}
+  </CardContent>
+  </Card>
+  ))
+  )}
+  </div>
+  </div>
+  );
   }
-
+  
   if (activeView === 'resources') {
     return (
       <div className="p-6 space-y-6 max-w-4xl mx-auto">
@@ -526,16 +566,23 @@ userAlerts.slice(0, 3).map((alert) => (
                 Join active community help groups for disaster relief coordination
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-3 max-h-80 overflow-y-auto">
-              {SUPPORT_GROUPS.map((group, index) => (
-                <div key={index} className="p-4 border rounded-lg hover:bg-muted/50 transition-colors">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h4 className="font-medium">{group.name}</h4>
-                      <p className="text-sm text-muted-foreground mt-1">{group.description}</p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {group.members.toLocaleString()} members
-                      </p>
+<div className="space-y-3 max-h-80 overflow-y-auto">
+  {isLoadingGroups ? (
+    <div className="flex items-center justify-center py-8">
+      <Loader2 className="h-6 w-6 animate-spin text-purple-600 mr-2" />
+      <span className="text-muted-foreground">Loading groups...</span>
+    </div>
+  ) : supportGroups.map((group) => (
+  <div key={group.id} className="p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+  <div className="flex items-start justify-between">
+  <div className="flex-1">
+  <h4 className="font-medium">{group.name}</h4>
+  <p className="text-sm text-muted-foreground mt-1">{group.description}</p>
+{group.members > 0 && (
+    <p className="text-xs text-muted-foreground mt-2">
+      {group.members.toLocaleString()} members
+    </p>
+  )}
                     </div>
                     <Button 
                       size="sm" 

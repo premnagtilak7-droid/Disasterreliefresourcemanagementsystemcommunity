@@ -318,3 +318,143 @@ export async function analyzeAndUpdateAlert(
   
   return analysis;
 }
+
+// ============ MISSION AI TRIAGE ============
+
+export interface MissionTriageResult {
+  severity: number; // 1-10
+  primaryNeed: string;
+  description: string;
+  requiredEquipment: string[];
+  safetyWarnings: string[];
+  estimatedTimeToResolve: string;
+}
+
+/**
+ * Analyze a disaster photo for mission triage - provides equipment recommendations
+ */
+export async function analyzeMissionPhoto(base64Data: string): Promise<MissionTriageResult> {
+  if (!import.meta.env.VITE_GEMINI_API_KEY) {
+    return {
+      severity: 5,
+      primaryNeed: "General Assistance",
+      description: "AI analysis unavailable - API key not configured",
+      requiredEquipment: ["First aid kit", "Flashlight", "Water bottles"],
+      safetyWarnings: ["Assess the situation before entering"],
+      estimatedTimeToResolve: "30-60 minutes",
+    };
+  }
+
+  try {
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        maxOutputTokens: 500,
+        temperature: 0.2,
+      }
+    });
+
+    const prompt = `You are a disaster relief AI assistant helping volunteers prepare for rescue missions.
+Analyze this disaster photo and provide detailed triage information.
+
+Respond ONLY with a valid JSON object (no markdown):
+{
+  "severity": 1-10 (10 = most severe),
+  "primaryNeed": "Medical" | "Rescue" | "Food" | "Shelter" | "Water" | "Evacuation" | "Other",
+  "description": "Brief description of the situation (max 50 words)",
+  "requiredEquipment": ["list", "of", "equipment", "needed"],
+  "safetyWarnings": ["important", "safety", "precautions"],
+  "estimatedTimeToResolve": "estimated time to help"
+}
+
+Equipment examples: First aid kit, stretcher, rope, flashlight, water bottles, blankets, fire extinguisher, crowbar, protective gloves, face mask, etc.`;
+
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          mimeType: "image/jpeg",
+          data: base64Data,
+        },
+      },
+    ]);
+
+    const responseText = result.response.text();
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    
+    if (!jsonMatch) {
+      throw new Error("Invalid response format");
+    }
+
+    return JSON.parse(jsonMatch[0]) as MissionTriageResult;
+  } catch (error) {
+    console.error("Mission triage error:", error);
+    return {
+      severity: 5,
+      primaryNeed: "General Assistance",
+      description: "Unable to analyze photo automatically",
+      requiredEquipment: ["First aid kit", "Flashlight", "Water bottles"],
+      safetyWarnings: ["Proceed with caution", "Assess situation before entering"],
+      estimatedTimeToResolve: "30-60 minutes",
+    };
+  }
+}
+
+// ============ GEMINI CHATBOT ============
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Gemini-powered Disaster Assistant chatbot
+ */
+export async function sendChatMessage(
+  message: string,
+  chatHistory: ChatMessage[],
+  userContext?: {
+    location?: string;
+    emergencyType?: string;
+    description?: string;
+  }
+): Promise<string> {
+  if (!import.meta.env.VITE_GEMINI_API_KEY) {
+    return "I'm sorry, the AI assistant is not available right now. Please contact emergency services at 112 for immediate help.";
+  }
+
+  try {
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        maxOutputTokens: 300,
+        temperature: 0.7,
+      }
+    });
+
+    const contextInfo = userContext 
+      ? `\n\nUser Context:\n- Location: ${userContext.location || 'Unknown'}\n- Emergency Type: ${userContext.emergencyType || 'General'}\n- Situation: ${userContext.description || 'Not specified'}`
+      : '';
+
+    const systemPrompt = `You are a Disaster Relief AI Assistant. Your role is to:
+1. Provide safety advice during emergencies
+2. Help victims understand what to do while waiting for rescue
+3. Offer emotional support and reassurance
+4. Guide users on first aid and survival basics
+5. Help coordinate with emergency services
+
+Be concise, calm, and helpful. Keep responses under 150 words.
+If someone is in immediate danger, always advise them to call emergency services (112).${contextInfo}
+
+Chat History:
+${chatHistory.map(m => `${m.role}: ${m.content}`).join('\n')}
+
+User: ${message}`;
+
+    const result = await model.generateContent(systemPrompt);
+    return result.response.text();
+  } catch (error) {
+    console.error("Chatbot error:", error);
+    return "I apologize, but I'm having trouble responding right now. For immediate assistance, please call emergency services at 112.";
+  }
+}
