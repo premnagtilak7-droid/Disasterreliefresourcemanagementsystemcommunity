@@ -316,7 +316,12 @@ export async function getResolvedCountByVolunteer(volunteerId: string): Promise<
 
 /**
  * Complete a mission and move it to rescue history
- * This archives the alert for the volunteer's portfolio
+ * This archives the alert for the volunteer's portfolio and updates volunteer stats
+ * 
+ * DUAL-UPDATE LOGIC:
+ * 1. Update Alert Document status to 'solved'
+ * 2. Update Volunteer Profile (totalRescues, peopleHelped)
+ * 3. Add record to rescueHistory sub-collection under volunteer UID
  */
 export async function completeAndArchiveMission(
   alertId: string,
@@ -334,18 +339,61 @@ export async function completeAndArchiveMission(
     
     const alertData = alertSnapshot.data();
     
-    // 2. Update alert status to resolved
+    // Calculate people helped from alert data
+    const peopleHelped = alertData.peopleCount ? parseInt(alertData.peopleCount) : 1;
+    
+    // 2. Update alert status to 'solved'
     await updateDoc(alertRef, {
-      status: "resolved",
+      status: "solved",
       resolverId: volunteerId,
       resolverName: volunteerName,
       resolvedAt: serverTimestamp(),
     });
     
-    // 3. Add to rescue history collection
+    // 3. Update or create volunteer profile in 'volunteers' collection
+    const volunteerRef = doc(db, "volunteers", volunteerId);
+    const volunteerSnapshot = await getDoc(volunteerRef);
+    
+    if (volunteerSnapshot.exists()) {
+      // Increment existing stats
+      const currentData = volunteerSnapshot.data();
+      await updateDoc(volunteerRef, {
+        totalRescues: (currentData.totalRescues || 0) + 1,
+        peopleHelped: (currentData.peopleHelped || 0) + peopleHelped,
+        lastRescueAt: serverTimestamp(),
+      });
+    } else {
+      // Create new volunteer profile
+      const { setDoc } = await import('firebase/firestore');
+      await setDoc(volunteerRef, {
+        name: volunteerName,
+        totalRescues: 1,
+        peopleHelped: peopleHelped,
+        joinedAt: serverTimestamp(),
+        lastRescueAt: serverTimestamp(),
+      });
+    }
+    
+    // 4. Add to volunteer's rescueHistory sub-collection
+    await addDoc(collection(db, "volunteers", volunteerId, "rescueHistory"), {
+      alertId: alertId,
+      victimName: alertData.name || 'Unknown',
+      victimPhone: alertData.phone || null,
+      emergencyType: alertData.emergencyType || 'General',
+      description: alertData.description || null,
+      location: alertData.location || null,
+      latitude: alertData.latitude || null,
+      longitude: alertData.longitude || null,
+      imageUrl: alertData.imageUrl || alertData.photoURL || null,
+      peopleHelped: peopleHelped,
+      resolvedAt: serverTimestamp(),
+      visionAnalysis: alertData.visionAnalysis || null,
+    });
+    
+    // 5. Also add to global rescue history collection for querying
     await addDoc(collection(db, "rescueHistory"), {
       ...alertData,
-      status: "resolved",
+      status: "solved",
       resolverId: volunteerId,
       resolverName: volunteerName,
       resolvedAt: serverTimestamp(),
@@ -357,6 +405,93 @@ export async function completeAndArchiveMission(
     console.error("Error completing mission:", error);
     throw new Error("Failed to complete mission.");
   }
+}
+
+/**
+ * Get volunteer profile stats
+ */
+export interface VolunteerProfile {
+  name: string;
+  totalRescues: number;
+  peopleHelped: number;
+  joinedAt?: ReturnType<typeof serverTimestamp>;
+  lastRescueAt?: ReturnType<typeof serverTimestamp>;
+}
+
+export async function getVolunteerProfile(volunteerId: string): Promise<VolunteerProfile | null> {
+  try {
+    const volunteerRef = doc(db, "volunteers", volunteerId);
+    const snapshot = await getDoc(volunteerRef);
+    
+    if (snapshot.exists()) {
+      return snapshot.data() as VolunteerProfile;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error fetching volunteer profile:", error);
+    return null;
+  }
+}
+
+/**
+ * Subscribe to volunteer's rescue history sub-collection in real-time
+ */
+export interface VolunteerRescueRecord {
+  id: string;
+  alertId: string;
+  victimName: string;
+  victimPhone?: string;
+  emergencyType: string;
+  description?: string;
+  location?: string;
+  latitude?: number;
+  longitude?: number;
+  imageUrl?: string;
+  peopleHelped: number;
+  resolvedAt: ReturnType<typeof serverTimestamp>;
+}
+
+export function subscribeToVolunteerRescueHistory(
+  volunteerId: string,
+  callback: (history: VolunteerRescueRecord[]) => void
+): () => void {
+  const historyRef = collection(db, "volunteers", volunteerId, "rescueHistory");
+  
+  const unsubscribe = onSnapshot(historyRef, (snapshot) => {
+    const history: VolunteerRescueRecord[] = [];
+    snapshot.forEach((docSnap) => {
+      history.push({ id: docSnap.id, ...docSnap.data() } as VolunteerRescueRecord);
+    });
+    // Sort by resolvedAt descending (most recent first)
+    history.sort((a, b) => {
+      const aTime = a.resolvedAt ? (a.resolvedAt as unknown as { seconds: number }).seconds : 0;
+      const bTime = b.resolvedAt ? (b.resolvedAt as unknown as { seconds: number }).seconds : 0;
+      return bTime - aTime;
+    });
+    callback(history);
+  });
+
+  return unsubscribe;
+}
+
+/**
+ * Subscribe to volunteer profile stats in real-time
+ */
+export function subscribeToVolunteerProfile(
+  volunteerId: string,
+  callback: (profile: VolunteerProfile | null) => void
+): () => void {
+  const volunteerRef = doc(db, "volunteers", volunteerId);
+  
+  const unsubscribe = onSnapshot(volunteerRef, (snapshot) => {
+    if (snapshot.exists()) {
+      callback(snapshot.data() as VolunteerProfile);
+    } else {
+      callback(null);
+    }
+  });
+
+  return unsubscribe;
 }
 
 /**

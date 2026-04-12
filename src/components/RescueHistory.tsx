@@ -11,20 +11,36 @@ import {
   Award,
   Clock
 } from 'lucide-react';
-import { subscribeToRescueHistory, RescueHistoryItem } from '@/lib/alerts';
+import { 
+  subscribeToVolunteerRescueHistory, 
+  subscribeToVolunteerProfile,
+  VolunteerRescueRecord,
+  VolunteerProfile 
+} from '@/lib/alerts';
 
 interface RescueHistoryProps {
   volunteerId: string;
 }
 
 export function RescueHistory({ volunteerId }: RescueHistoryProps) {
-  const [history, setHistory] = useState<RescueHistoryItem[]>([]);
+  const [history, setHistory] = useState<VolunteerRescueRecord[]>([]);
+  const [profile, setProfile] = useState<VolunteerProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Subscribe to volunteer's rescue history sub-collection
   useEffect(() => {
-    const unsubscribe = subscribeToRescueHistory(volunteerId, (items) => {
+    const unsubscribe = subscribeToVolunteerRescueHistory(volunteerId, (items) => {
       setHistory(items);
       setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [volunteerId]);
+
+  // Subscribe to volunteer profile stats
+  useEffect(() => {
+    const unsubscribe = subscribeToVolunteerProfile(volunteerId, (profileData) => {
+      setProfile(profileData);
     });
 
     return () => unsubscribe();
@@ -72,19 +88,19 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
         </div>
       </div>
 
-      {/* Stats Overview */}
+      {/* Stats Overview - Uses volunteer profile for accurate counts */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
             <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
-            <p className="text-2xl font-bold">{history.length}</p>
+            <p className="text-2xl font-bold">{profile?.totalRescues ?? history.length}</p>
             <p className="text-sm text-muted-foreground">Total Rescues</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <User className="h-8 w-8 text-blue-500 mx-auto mb-2" />
-            <p className="text-2xl font-bold">{history.length}</p>
+            <p className="text-2xl font-bold">{profile?.peopleHelped ?? history.length}</p>
             <p className="text-sm text-muted-foreground">People Helped</p>
           </CardContent>
         </Card>
@@ -92,7 +108,7 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
           <CardContent className="p-4 text-center">
             <Camera className="h-8 w-8 text-purple-500 mx-auto mb-2" />
             <p className="text-2xl font-bold">
-              {history.filter(h => h.photoURL).length}
+              {history.filter(h => h.imageUrl).length}
             </p>
             <p className="text-sm text-muted-foreground">Photo Documented</p>
           </CardContent>
@@ -124,10 +140,10 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
           {history.map((item, index) => (
             <Card key={item.id} className="overflow-hidden">
               <div className="flex">
-                {item.photoURL && (
+                {item.imageUrl && (
                   <div className="w-32 h-32 flex-shrink-0">
                     <img 
-                      src={item.photoURL} 
+                      src={item.imageUrl} 
                       alt="Rescue scene" 
                       className="w-full h-full object-cover"
                     />
@@ -149,25 +165,24 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <User className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{item.name}</span>
+                      <span className="font-medium">{item.victimName || 'Unknown'}</span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <MapPin className="h-4 w-4" />
-                      <span>{item.location}</span>
+                      <span>{item.location || 'Location not recorded'}</span>
                     </div>
-                    {item.phone && (
+                    {item.victimPhone && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Phone className="h-4 w-4" />
-                        <span>{item.phone}</span>
+                        <span>{item.victimPhone}</span>
+                      </div>
+                    )}
+                    {item.peopleHelped > 1 && (
+                      <div className="text-sm text-green-600 font-medium">
+                        {item.peopleHelped} people helped
                       </div>
                     )}
                   </div>
-
-                  {item.visionAnalysis && (
-                    <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/30 rounded text-sm">
-                      <span className="font-medium">AI Analysis:</span> Severity {item.visionAnalysis.severity}/10 - {item.visionAnalysis.primaryNeed}
-                    </div>
-                  )}
                 </div>
               </div>
             </Card>
