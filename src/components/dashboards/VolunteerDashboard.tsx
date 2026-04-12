@@ -17,7 +17,14 @@ import {
 import { VolunteerMapView } from '../VolunteerMapView';
 import { VolunteerSettings } from '../VolunteerSettings';
 import { RescueHistory } from '../RescueHistory';
-import { getResolvedCountByVolunteer, subscribeToPendingAlerts, markAlertAsSolved, AlertWithId } from '@/lib/alerts';
+import { 
+  getResolvedCountByVolunteer, 
+  subscribeToPendingAlerts, 
+  markAlertAsSolved, 
+  subscribeToVolunteerProfile,
+  AlertWithId,
+  VolunteerProfile 
+} from '@/lib/alerts';
 import { toast } from 'sonner';
 
 interface VolunteerDashboardProps {
@@ -28,17 +35,26 @@ interface VolunteerDashboardProps {
 
 export function VolunteerDashboard({ user, activeView, setActiveView }: VolunteerDashboardProps) {
   const [peopleHelped, setPeopleHelped] = useState(0);
+  const [totalRescues, setTotalRescues] = useState(0);
   const [pendingNearby, setPendingNearby] = useState(0);
   const [pendingAlerts, setPendingAlerts] = useState<AlertWithId[]>([]);
   const [isResolving, setIsResolving] = useState<string | null>(null);
 
-  // Fetch real volunteer stats
+  // Subscribe to volunteer profile for real-time stats updates
   useEffect(() => {
-    async function fetchStats() {
-      const resolvedCount = await getResolvedCountByVolunteer(user.id);
-      setPeopleHelped(resolvedCount);
-    }
-    fetchStats();
+    const unsubscribe = subscribeToVolunteerProfile(user.id, (profile) => {
+      if (profile) {
+        setPeopleHelped(profile.peopleHelped || 0);
+        setTotalRescues(profile.totalRescues || 0);
+      } else {
+        // Fallback to query if profile doesn't exist yet
+        getResolvedCountByVolunteer(user.id).then((count) => {
+          setPeopleHelped(count);
+          setTotalRescues(count);
+        });
+      }
+    });
+    return () => unsubscribe();
   }, [user.id]);
 
   // Subscribe to pending alerts in real-time

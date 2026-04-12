@@ -299,17 +299,38 @@ export async function resolveAlert(alertId: string, resolverId?: string): Promis
 
 /**
  * Get count of alerts resolved by a specific volunteer
+ * Checks volunteer profile first, then falls back to counting alerts with both 'resolved' and 'solved' statuses
  */
 export async function getResolvedCountByVolunteer(volunteerId: string): Promise<number> {
   try {
-    const q = query(
+    // First try to get count from volunteer profile (most accurate)
+    const volunteerRef = doc(db, "volunteers", volunteerId);
+    const volunteerSnap = await getDoc(volunteerRef);
+    if (volunteerSnap.exists()) {
+      const data = volunteerSnap.data();
+      return data.totalRescues || 0;
+    }
+    
+    // Fallback: count from alerts collection (both resolved and solved statuses)
+    const qResolved = query(
       collection(db, "alerts"),
       where("status", "==", "resolved"),
       where("resolverId", "==", volunteerId)
     );
-    const snapshot = await getCountFromServer(q);
-    return snapshot.data().count;
-  } catch {
+    const qSolved = query(
+      collection(db, "alerts"),
+      where("status", "==", "solved"),
+      where("resolverId", "==", volunteerId)
+    );
+    
+    const [resolvedSnap, solvedSnap] = await Promise.all([
+      getCountFromServer(qResolved),
+      getCountFromServer(qSolved)
+    ]);
+    
+    return resolvedSnap.data().count + solvedSnap.data().count;
+  } catch (error) {
+    console.error("Error getting resolved count:", error);
     return 0;
   }
 }
