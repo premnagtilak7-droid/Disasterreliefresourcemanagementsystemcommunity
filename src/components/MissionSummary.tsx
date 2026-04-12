@@ -397,8 +397,8 @@ export function MissionSummary({
           </CardContent>
         </Card>
 
-{/* AI Mission Triage - Equipment Recommendations */}
-      <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/30">
+        {/* AI Mission Triage - Equipment Recommendations */}
+        <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/30">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
             <Package className="h-5 w-5" />
@@ -469,11 +469,11 @@ export function MissionSummary({
               <p className="text-sm mt-1">Bring standard emergency kit</p>
             </div>
           )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      {/* Victim-Volunteer Chat */}
-      <Card>
+        {/* Victim-Volunteer Chat */}
+        <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <MessageCircle className="h-5 w-5" />
