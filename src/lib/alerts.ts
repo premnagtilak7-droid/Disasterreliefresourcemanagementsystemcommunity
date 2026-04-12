@@ -203,6 +203,54 @@ export function subscribeToPendingAlerts(
 }
 
 /**
+ * Subscribe to ALL alerts in real-time (for victim status page to see solved status instantly)
+ * @param callback - Function called with updated alerts array
+ * @returns Unsubscribe function
+ */
+export function subscribeToAllAlerts(
+  callback: (alerts: AlertWithId[]) => void
+): () => void {
+  const alertsRef = collection(db, "alerts");
+
+  const unsubscribe = onSnapshot(alertsRef, (snapshot) => {
+    const alerts: AlertWithId[] = [];
+    snapshot.forEach((docSnap) => {
+      const data = docSnap.data() as SOSAlertDocument;
+      alerts.push({ id: docSnap.id, ...data });
+    });
+    // Sort by createdAt descending (newest first)
+    alerts.sort((a, b) => {
+      const aTime = a.createdAt ? (a.createdAt as unknown as { seconds: number }).seconds : 0;
+      const bTime = b.createdAt ? (b.createdAt as unknown as { seconds: number }).seconds : 0;
+      return bTime - aTime;
+    });
+    callback(alerts);
+  });
+
+  return unsubscribe;
+}
+
+/**
+ * Mark an alert as solved (for volunteer dashboard)
+ * @param alertId - The document ID of the alert to mark as solved
+ * @param resolverId - The UID of the volunteer resolving the alert
+ */
+export async function markAlertAsSolved(alertId: string, resolverId?: string): Promise<void> {
+  try {
+    const alertRef = doc(db, "alerts", alertId);
+    await updateDoc(alertRef, {
+      status: "solved",
+      resolvedAt: serverTimestamp(),
+      ...(resolverId && { resolverId }),
+    });
+    console.log("ALERT MARKED AS SOLVED");
+  } catch (error) {
+    console.error("Error marking alert as solved:", error);
+    throw new Error("Failed to mark alert as solved.");
+  }
+}
+
+/**
  * Get count of pending alerts
  * @returns Count of pending requests
  */

@@ -13,18 +13,56 @@ import {
   Heart,
   Loader2,
   PhoneOff,
-  Navigation
+  Navigation,
+  X,
+  MessageCircle,
+  Users
 } from 'lucide-react';
 import { AidRequestForm } from '../AidRequestForm';
-import { submitEmergencySOS, subscribeToPendingAlerts, AlertWithId } from '@/lib/alerts';
+import { submitEmergencySOS, subscribeToAllAlerts, AlertWithId } from '@/lib/alerts';
 import { subscribeToNearbyVolunteers, getCurrentLocation, NearbyVolunteer, getCityFromCoordinates } from '@/lib/geolocation';
 import { toast } from 'sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
 
 interface VictimDashboardProps {
   user: User;
   activeView: string;
   setActiveView: (view: string) => void;
 }
+
+// Community Support Groups data
+const SUPPORT_GROUPS = [
+  {
+    name: 'Disaster Relief Community',
+    description: 'General disaster relief coordination and support',
+    whatsappLink: 'https://wa.me/yourlink',
+    members: 1250,
+  },
+  {
+    name: 'Local Emergency Network',
+    description: 'Connect with neighbors during emergencies',
+    whatsappLink: 'https://wa.me/yourlink',
+    members: 458,
+  },
+  {
+    name: 'Medical Aid Support',
+    description: 'Medical emergencies and health assistance',
+    whatsappLink: 'https://wa.me/yourlink',
+    members: 892,
+  },
+  {
+    name: 'Food & Shelter Assistance',
+    description: 'Basic necessities and temporary housing help',
+    whatsappLink: 'https://wa.me/yourlink',
+    members: 634,
+  },
+];
 
 export function VictimDashboard({ user, activeView, setActiveView }: VictimDashboardProps) {
   const [isSOSLoading, setIsSOSLoading] = useState(false);
@@ -33,6 +71,7 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
   const [nearbyVolunteers, setNearbyVolunteers] = useState<NearbyVolunteer[]>([]);
   const [cityName, setCityName] = useState<string>('Your Location');
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [isSupportGroupsOpen, setIsSupportGroupsOpen] = useState(false);
 
   // Get current location and nearby volunteers
   useEffect(() => {
@@ -71,9 +110,9 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
     return () => unsubscribe();
   }, [userLocation]);
 
-  // Subscribe to user's alerts
+  // Subscribe to ALL alerts in real-time (shows solved status instantly)
   useEffect(() => {
-    const unsubscribe = subscribeToPendingAlerts((alerts) => {
+    const unsubscribe = subscribeToAllAlerts((alerts) => {
       setUserAlerts(alerts);
     });
     return () => unsubscribe();
@@ -139,12 +178,15 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <CardTitle className="text-lg">{alert.emergencyType} Request</CardTitle>
-                      <Badge variant={
-                        alert.status === 'resolved' ? 'default' :
-                        alert.status === 'acknowledged' ? 'secondary' : 'outline'
-                      }>
-                        {alert.status}
+                      <CardTitle className="text-lg">{alert.emergencyType || 'Aid'} Request</CardTitle>
+                      <Badge 
+                        className={
+                          alert.status === 'solved' || alert.status === 'resolved' 
+                            ? 'bg-green-500 hover:bg-green-600 text-white' 
+                            : 'bg-amber-500 hover:bg-amber-600 text-white'
+                        }
+                      >
+                        {alert.status === 'solved' || alert.status === 'resolved' ? 'Solved' : 'Pending'}
                       </Badge>
                     </div>
                     <span className="text-sm text-muted-foreground">#{alert.id.slice(0, 8)}</span>
@@ -393,22 +435,28 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
                 <p>No active requests</p>
               </div>
             ) : (
-              userAlerts.slice(0, 3).map((alert) => (
-                <div key={alert.id} className="flex items-center justify-between p-3 border rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    {alert.status === 'resolved' ? (
-                      <CheckCircle className="h-5 w-5 text-green-600" />
-                    ) : (
-                      <Clock className="h-5 w-5 text-orange-600" />
-                    )}
-                    <div>
-                      <p className="font-medium">{alert.emergencyType} Request</p>
-                      <p className="text-sm text-muted-foreground capitalize">
-                        {alert.status}
-                      </p>
-                    </div>
-                  </div>
-                  <Badge variant={alert.status === 'resolved' ? 'default' : 'secondary'}>
+userAlerts.slice(0, 3).map((alert) => (
+  <div key={alert.id} className="flex items-center justify-between p-3 border rounded-lg">
+  <div className="flex items-center space-x-3">
+  {alert.status === 'solved' || alert.status === 'resolved' ? (
+  <CheckCircle className="h-5 w-5 text-green-600" />
+  ) : (
+  <Clock className="h-5 w-5 text-amber-500" />
+  )}
+  <div>
+  <p className="font-medium">{alert.emergencyType || 'Aid'} Request</p>
+  <Badge 
+    className={
+      alert.status === 'solved' || alert.status === 'resolved'
+        ? 'bg-green-500 hover:bg-green-600 text-white text-xs'
+        : 'bg-amber-500 hover:bg-amber-600 text-white text-xs'
+    }
+  >
+    {alert.status === 'solved' || alert.status === 'resolved' ? 'Solved' : 'Pending'}
+  </Badge>
+  </div>
+  </div>
+  <Badge variant="outline">
                     #{alert.id.slice(0, 6)}
                   </Badge>
                 </div>
@@ -459,12 +507,55 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
               <Heart className="h-8 w-8 text-purple-600" />
               <h3 className="font-medium">Support Groups</h3>
               <p className="text-sm text-muted-foreground">Community assistance</p>
-              <Button size="sm" variant="outline">
+              <Button size="sm" variant="outline" onClick={() => setIsSupportGroupsOpen(true)}>
                 Connect
               </Button>
             </div>
           </CardContent>
         </Card>
+
+        {/* Support Groups Modal */}
+        <Dialog open={isSupportGroupsOpen} onOpenChange={setIsSupportGroupsOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-purple-600" />
+                Community Support Groups
+              </DialogTitle>
+              <DialogDescription>
+                Join active community help groups for disaster relief coordination
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {SUPPORT_GROUPS.map((group, index) => (
+                <div key={index} className="p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <h4 className="font-medium">{group.name}</h4>
+                      <p className="text-sm text-muted-foreground mt-1">{group.description}</p>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        {group.members.toLocaleString()} members
+                      </p>
+                    </div>
+                    <Button 
+                      size="sm" 
+                      className="ml-3 bg-green-600 hover:bg-green-700"
+                      onClick={() => window.open(group.whatsappLink, '_blank')}
+                    >
+                      <MessageCircle className="h-4 w-4 mr-1" />
+                      Join Chat
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="pt-4 border-t">
+              <p className="text-xs text-muted-foreground text-center">
+                These groups are community-managed and provide peer support during emergencies
+              </p>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
