@@ -63,27 +63,13 @@ export function MissionSummary({
   onClose,
   onResolved 
 }: MissionSummaryProps) {
+  // ALL hooks must be called before any conditional returns (React rules of hooks)
   const [isResolving, setIsResolving] = useState(false);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
   
   // AI Triage State
   const [aiTriage, setAiTriage] = useState<MissionTriageResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-
-  // Loading guard - show spinner if alert data is incomplete
-  if (!alert || !alert.id) {
-    return (
-      <div className="p-6 flex items-center justify-center min-h-[400px]">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-          <p className="text-muted-foreground">Loading mission details...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Get imageUrl from either photoURL or imageUrl field (from alerts collection)
-  const imageUrl = alert.photoURL || (alert as unknown as { imageUrl?: string }).imageUrl || null;
   
   // Chat State
   const [chatMessages, setChatMessages] = useState<FirestoreChatMessage[]>([]);
@@ -101,6 +87,9 @@ export function MissionSummary({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
     libraries,
   });
+
+  // Get imageUrl from either photoURL or imageUrl field (from alerts collection)
+  const imageUrl = alert?.photoURL || (alert as unknown as { imageUrl?: string })?.imageUrl || null;
 
   // Analyze photo with AI when mission starts
   useEffect(() => {
@@ -247,6 +236,18 @@ export function MissionSummary({
       );
     }
   };
+
+  // Loading guard - show spinner if alert data is incomplete (AFTER all hooks)
+  if (!alert || !alert.id) {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[400px]">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <p className="text-muted-foreground">Loading mission details...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
