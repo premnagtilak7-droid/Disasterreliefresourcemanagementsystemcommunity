@@ -189,10 +189,16 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     return () => unsubscribe();
   }, [userLocation, playBeep]);
 
-  // Filter alerts within 2km radius
+  // Filter alerts within 2km radius (CRITICAL alerts bypass radius filter)
   useEffect(() => {
     if (userLocation && alerts.length > 0) {
       const nearby = alerts.filter((alert) => {
+        // CRITICAL alerts bypass the 2km radius filter - show to everyone
+        if (alert.priority === 'CRITICAL' || alert.isCritical || alert.bypassRadius || alert.isAnonymous) {
+          return alert.latitude && alert.longitude;
+        }
+        
+        // Normal alerts: check 2km radius
         if (alert.latitude && alert.longitude) {
           const distance = calculateDistance(
             userLocation.lat,
@@ -204,6 +210,16 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
         }
         return false;
       });
+      
+      // Sort: CRITICAL alerts first
+      nearby.sort((a, b) => {
+        const aIsCritical = a.priority === 'CRITICAL' || a.isCritical;
+        const bIsCritical = b.priority === 'CRITICAL' || b.isCritical;
+        if (aIsCritical && !bIsCritical) return -1;
+        if (!aIsCritical && bIsCritical) return 1;
+        return 0;
+      });
+      
       setNearbyAlerts(nearby);
     } else {
       setNearbyAlerts([]);
@@ -492,25 +508,39 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
                         ).toFixed(2)
                       : 'N/A';
 
+                    const isCritical = alert.priority === 'CRITICAL' || alert.isCritical || alert.isAnonymous;
+
                     return (
                       <div
                         key={alert.id}
                         className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                          selectedAlert?.id === alert.id
-                            ? 'bg-red-50 border-red-200'
-                            : 'hover:bg-gray-50'
+                          isCritical
+                            ? 'bg-red-100 border-red-400 dark:bg-red-950/50 dark:border-red-700 animate-pulse'
+                            : selectedAlert?.id === alert.id
+                              ? 'bg-red-50 border-red-200'
+                              : 'hover:bg-gray-50'
                         }`}
                         onClick={() => setSelectedAlert(alert)}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {isCritical && (
+                                <Badge className="text-xs bg-red-600 text-white animate-pulse">
+                                  CRITICAL
+                                </Badge>
+                              )}
                               <Badge variant="destructive" className="text-xs">
                                 {alert.emergencyType}
                               </Badge>
                               <span className="text-xs text-muted-foreground">
                                 {distance}km away
                               </span>
+                              {alert.isAnonymous && (
+                                <Badge variant="outline" className="text-xs">
+                                  Anonymous SOS
+                                </Badge>
+                              )}
                             </div>
                             <div className="mt-2 space-y-1">
                               <div className="flex items-center gap-2 text-sm">

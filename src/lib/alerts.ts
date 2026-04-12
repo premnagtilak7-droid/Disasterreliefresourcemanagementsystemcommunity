@@ -145,6 +145,11 @@ export interface AlertWithId extends SOSAlertDocument {
   resolverName?: string;
   resolverId?: string;
   resolvedAt?: ReturnType<typeof serverTimestamp>;
+  // Critical alert fields for emergency panic mode
+  priority?: string;
+  isCritical?: boolean;
+  isAnonymous?: boolean;
+  bypassRadius?: boolean;
 }
 
 export interface RescueHistoryItem extends AlertWithId {

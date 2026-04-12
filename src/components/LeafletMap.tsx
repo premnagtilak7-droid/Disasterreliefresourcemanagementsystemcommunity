@@ -121,21 +121,35 @@ export function LeafletMap({
     markersRef.current.forEach((marker) => marker.remove());
     markersRef.current = [];
 
-    // Add alert markers (red)
+    // Add alert markers - CRITICAL alerts get flashing animation
     alerts.forEach((alert) => {
       if (!alert.latitude || !alert.longitude) return;
 
+      const isCritical = alert.priority === 'CRITICAL' || alert.isCritical || alert.isAnonymous;
+      
+      // Critical alerts get a larger, flashing marker
       const alertIcon = L.divIcon({
-        html: `<div style="background: #dc2626; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center;">
-          <div style="background: white; width: 8px; height: 8px; border-radius: 50%;"></div>
-        </div>`,
-        className: 'alert-marker',
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
+        html: isCritical 
+          ? `<div class="critical-marker" style="background: #dc2626; width: 32px; height: 32px; border-radius: 50%; border: 4px solid #fef08a; box-shadow: 0 0 20px rgba(220,38,38,0.8); display: flex; align-items: center; justify-content: center; animation: pulse-critical 0.5s ease-in-out infinite alternate;">
+              <div style="background: white; width: 12px; height: 12px; border-radius: 50%;"></div>
+            </div>
+            <style>
+              @keyframes pulse-critical {
+                from { transform: scale(1); box-shadow: 0 0 10px rgba(220,38,38,0.6); }
+                to { transform: scale(1.15); box-shadow: 0 0 25px rgba(220,38,38,1); }
+              }
+            </style>`
+          : `<div style="background: #dc2626; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center;">
+              <div style="background: white; width: 8px; height: 8px; border-radius: 50%;"></div>
+            </div>`,
+        className: isCritical ? 'critical-alert-marker' : 'alert-marker',
+        iconSize: isCritical ? [32, 32] : [24, 24],
+        iconAnchor: isCritical ? [16, 16] : [12, 12],
       });
 
       const marker = L.marker([alert.latitude, alert.longitude], {
         icon: alertIcon,
+        zIndexOffset: isCritical ? 1000 : 0, // Critical alerts on top
       }).addTo(mapRef.current!);
 
       marker.on('click', () => onSelectAlert(alert));

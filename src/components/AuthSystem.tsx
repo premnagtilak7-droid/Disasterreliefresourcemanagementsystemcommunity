@@ -6,10 +6,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ThemeToggle } from './ThemeToggle';
-import { UserCheck, Shield, Users, Eye, EyeOff } from 'lucide-react';
+import { UserCheck, Shield, Users, Eye, EyeOff, AlertTriangle, Loader2 } from 'lucide-react';
 import { roleDescriptions } from './constants/uiConstants';
-import { registerUser, loginUser, signInWithGoogle, resetPassword } from '@/lib/users';
+import { registerUser, loginUser, signInWithGoogle, resetPassword, signInAnonymouslyForEmergency } from '@/lib/users';
 import { toast } from 'sonner';
+import { PanicForm } from './PanicForm';
 
 export type UserRole = 'admin' | 'volunteer' | 'victim';
 
@@ -36,6 +37,9 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
+  const [isPanicMode, setIsPanicMode] = useState(false);
+  const [panicUserId, setPanicUserId] = useState<string | null>(null);
+  const [isStartingPanic, setIsStartingPanic] = useState(false);
   
   // Sign In Form State
   const [signInEmail, setSignInEmail] = useState('');
@@ -47,6 +51,21 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
   const [signUpPassword, setSignUpPassword] = useState('');
   const [signUpConfirmPassword, setSignUpConfirmPassword] = useState('');
   const [signUpRole, setSignUpRole] = useState<UserRole>('victim');
+
+  const handleEmergencySOS = async () => {
+    setIsStartingPanic(true);
+    try {
+      const userData = await signInAnonymouslyForEmergency();
+      setPanicUserId(userData.uid);
+      setIsPanicMode(true);
+      toast.success('Emergency mode activated');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start emergency mode';
+      toast.error(errorMessage);
+    } finally {
+      setIsStartingPanic(false);
+    }
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,10 +175,45 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
     }
   };
 
+  // Show Panic Form if in emergency mode
+  if (isPanicMode && panicUserId) {
+    return (
+      <PanicForm 
+        userId={panicUserId}
+        onBack={() => {
+          setIsPanicMode(false);
+          setPanicUserId(null);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-100/40 dark:from-slate-900 dark:via-slate-800/50 dark:to-slate-700/30 flex items-center justify-center p-4 relative">
       <div className="absolute top-4 right-4 z-10">
         <ThemeToggle />
+      </div>
+
+      {/* Emergency SOS Button - Fixed at top */}
+      <div className="absolute top-4 left-4 z-10">
+        <Button
+          onClick={handleEmergencySOS}
+          disabled={isStartingPanic}
+          className="bg-red-600 hover:bg-red-700 text-white font-bold shadow-lg animate-pulse hover:animate-none"
+          size="lg"
+        >
+          {isStartingPanic ? (
+            <>
+              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+              Starting...
+            </>
+          ) : (
+            <>
+              <AlertTriangle className="h-5 w-5 mr-2" />
+              EMERGENCY SOS
+            </>
+          )}
+        </Button>
       </div>
       
       <Card className="w-full max-w-md shadow-2xl border-border/50 backdrop-blur-sm">
