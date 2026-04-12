@@ -12,10 +12,9 @@ import {
   Clock
 } from 'lucide-react';
 import { 
-  subscribeToVolunteerRescueHistory, 
-  subscribeToVolunteerProfile,
-  VolunteerRescueRecord,
-  VolunteerProfile 
+  subscribeToRescueHistory, 
+  getResolvedCountByVolunteer,
+  RescueHistoryItem 
 } from '@/lib/alerts';
 
 interface RescueHistoryProps {
@@ -23,13 +22,13 @@ interface RescueHistoryProps {
 }
 
 export function RescueHistory({ volunteerId }: RescueHistoryProps) {
-  const [history, setHistory] = useState<VolunteerRescueRecord[]>([]);
-  const [profile, setProfile] = useState<VolunteerProfile | null>(null);
+  const [history, setHistory] = useState<RescueHistoryItem[]>([]);
+  const [peopleHelped, setPeopleHelped] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Subscribe to volunteer's rescue history sub-collection
+  // Subscribe to rescue history from rescueHistory collection
   useEffect(() => {
-    const unsubscribe = subscribeToVolunteerRescueHistory(volunteerId, (items) => {
+    const unsubscribe = subscribeToRescueHistory(volunteerId, (items) => {
       setHistory(items);
       setIsLoading(false);
     });
@@ -37,13 +36,13 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
     return () => unsubscribe();
   }, [volunteerId]);
 
-  // Subscribe to volunteer profile stats
+  // Fetch people helped count
   useEffect(() => {
-    const unsubscribe = subscribeToVolunteerProfile(volunteerId, (profileData) => {
-      setProfile(profileData);
-    });
-
-    return () => unsubscribe();
+    async function fetchStats() {
+      const count = await getResolvedCountByVolunteer(volunteerId);
+      setPeopleHelped(count);
+    }
+    fetchStats();
   }, [volunteerId]);
 
   const formatDate = (timestamp: unknown) => {
@@ -88,19 +87,19 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
         </div>
       </div>
 
-      {/* Stats Overview - Uses volunteer profile for accurate counts */}
+      {/* Stats Overview */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
           <CardContent className="p-4 text-center">
             <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
-            <p className="text-2xl font-bold">{profile?.totalRescues ?? history.length}</p>
+            <p className="text-2xl font-bold">{history.length}</p>
             <p className="text-sm text-muted-foreground">Total Rescues</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <User className="h-8 w-8 text-blue-500 mx-auto mb-2" />
-            <p className="text-2xl font-bold">{profile?.peopleHelped ?? history.length}</p>
+            <p className="text-2xl font-bold">{peopleHelped}</p>
             <p className="text-sm text-muted-foreground">People Helped</p>
           </CardContent>
         </Card>
@@ -108,7 +107,7 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
           <CardContent className="p-4 text-center">
             <Camera className="h-8 w-8 text-purple-500 mx-auto mb-2" />
             <p className="text-2xl font-bold">
-              {history.filter(h => h.imageUrl).length}
+              {history.filter(h => h.photoURL).length}
             </p>
             <p className="text-sm text-muted-foreground">Photo Documented</p>
           </CardContent>
@@ -140,10 +139,10 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
           {history.map((item, index) => (
             <Card key={item.id} className="overflow-hidden">
               <div className="flex">
-                {item.imageUrl && (
+                {(item.photoURL || item.imageUrl) && (
                   <div className="w-32 h-32 flex-shrink-0">
                     <img 
-                      src={item.imageUrl} 
+                      src={item.photoURL || item.imageUrl} 
                       alt="Rescue scene" 
                       className="w-full h-full object-cover"
                     />
@@ -165,21 +164,16 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <User className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{item.victimName || 'Unknown'}</span>
+                      <span className="font-medium">{item.name || 'Unknown'}</span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <MapPin className="h-4 w-4" />
                       <span>{item.location || 'Location not recorded'}</span>
                     </div>
-                    {item.victimPhone && (
+                    {item.phone && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Phone className="h-4 w-4" />
-                        <span>{item.victimPhone}</span>
-                      </div>
-                    )}
-                    {item.peopleHelped > 1 && (
-                      <div className="text-sm text-green-600 font-medium">
-                        {item.peopleHelped} people helped
+                        <span>{item.phone}</span>
                       </div>
                     )}
                   </div>

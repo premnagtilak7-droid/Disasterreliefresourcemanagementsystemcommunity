@@ -143,7 +143,8 @@ export interface AlertWithId extends SOSAlertDocument {
 
 export interface RescueHistoryItem extends AlertWithId {
   originalAlertId: string;
-}
+  imageUrl?: string;
+  }
 
 /**
  * Subscribe to volunteer's rescue history in real-time

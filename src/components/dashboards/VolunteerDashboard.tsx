@@ -21,9 +21,7 @@ import {
   getResolvedCountByVolunteer, 
   subscribeToPendingAlerts, 
   markAlertAsSolved, 
-  subscribeToVolunteerProfile,
-  AlertWithId,
-  VolunteerProfile 
+  AlertWithId 
 } from '@/lib/alerts';
 import { toast } from 'sonner';
 
@@ -35,26 +33,17 @@ interface VolunteerDashboardProps {
 
 export function VolunteerDashboard({ user, activeView, setActiveView }: VolunteerDashboardProps) {
   const [peopleHelped, setPeopleHelped] = useState(0);
-  const [totalRescues, setTotalRescues] = useState(0);
   const [pendingNearby, setPendingNearby] = useState(0);
   const [pendingAlerts, setPendingAlerts] = useState<AlertWithId[]>([]);
   const [isResolving, setIsResolving] = useState<string | null>(null);
 
-  // Subscribe to volunteer profile for real-time stats updates
+  // Fetch volunteer stats on mount and when resolving alerts
   useEffect(() => {
-    const unsubscribe = subscribeToVolunteerProfile(user.id, (profile) => {
-      if (profile) {
-        setPeopleHelped(profile.peopleHelped || 0);
-        setTotalRescues(profile.totalRescues || 0);
-      } else {
-        // Fallback to query if profile doesn't exist yet
-        getResolvedCountByVolunteer(user.id).then((count) => {
-          setPeopleHelped(count);
-          setTotalRescues(count);
-        });
-      }
-    });
-    return () => unsubscribe();
+    async function fetchStats() {
+      const count = await getResolvedCountByVolunteer(user.id);
+      setPeopleHelped(count);
+    }
+    fetchStats();
   }, [user.id]);
 
   // Subscribe to pending alerts in real-time

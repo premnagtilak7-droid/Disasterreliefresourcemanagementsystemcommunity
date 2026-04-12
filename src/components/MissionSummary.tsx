@@ -327,20 +327,29 @@ export function MissionSummary({
       </Card>
 
       {/* Photo & AI Analysis */}
-      {imageUrl && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Camera className="h-5 w-5" />
-              Disaster Photo & AI Analysis
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Camera className="h-5 w-5" />
+            Disaster Photo & AI Analysis
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {imageUrl ? (
             <img 
               src={imageUrl} 
               alt="Disaster scene" 
               className="w-full max-h-64 object-cover rounded-lg border"
             />
+          ) : (
+            <div className="w-full h-48 bg-gray-100 dark:bg-gray-800 rounded-lg border flex items-center justify-center">
+              <div className="text-center text-muted-foreground">
+                <Camera className="h-12 w-12 mx-auto mb-2 opacity-40" />
+                <p className="font-medium">No photo provided</p>
+                <p className="text-sm">The victim did not upload an image</p>
+              </div>
+            </div>
+          )}
             {alert?.visionAnalysis && (
               <div className={`grid grid-cols-2 gap-4 p-4 rounded-lg ${
                 alert.visionAnalysis?.isFalseAlarm 
@@ -387,7 +396,6 @@ export function MissionSummary({
             )}
           </CardContent>
         </Card>
-      )}
 
 {/* AI Mission Triage - Equipment Recommendations */}
       <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/30">
