@@ -75,7 +75,7 @@ export function MissionSummary({
   const [chatMessages, setChatMessages] = useState<FirestoreChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
   // AI Chatbot State
   const [aiChatMessages, setAiChatMessages] = useState<ChatMessage[]>([]);
@@ -130,7 +130,9 @@ export function MissionSummary({
       
       // Scroll to bottom when new messages arrive
       setTimeout(() => {
-        chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+        if (chatContainerRef.current) {
+          chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
       }, 100);
     });
 
@@ -473,7 +475,7 @@ export function MissionSummary({
         </CardHeader>
         <CardContent>
           <div className="border rounded-lg bg-muted/30">
-            <ScrollArea className="h-48 p-3" ref={chatScrollRef}>
+            <div className="h-48 p-3 overflow-y-auto" ref={chatContainerRef}>
               {chatMessages.length === 0 ? (
                 <div className="text-center text-muted-foreground py-8">
                   <MessageCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -498,8 +500,8 @@ export function MissionSummary({
                     </div>
                   ))}
                 </div>
-              )}
-            </ScrollArea>
+)}
+            </div>
             <div className="p-3 border-t flex gap-2">
               <Input
                 placeholder="Type a message..."
