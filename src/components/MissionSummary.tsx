@@ -22,7 +22,7 @@ import {
   Bot
 } from 'lucide-react';
 import { AlertWithId, completeAndArchiveMission } from '@/lib/alerts';
-import { analyzeMissionPhoto, MissionTriageResult, sendChatMessage, ChatMessage } from '@/lib/gemini';
+import { analyzeMissionPhoto, MissionTriageResult, sendChatMessage, ChatMessage, isGeminiConfigured } from '@/lib/gemini';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { GoogleMap, useJsApiLoader, DirectionsRenderer, Marker, Libraries } from '@react-google-maps/api';
@@ -66,10 +66,12 @@ export function MissionSummary({
   // ALL hooks must be called before any conditional returns (React rules of hooks)
   const [isResolving, setIsResolving] = useState(false);
   const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   
   // AI Triage State
   const [aiTriage, setAiTriage] = useState<MissionTriageResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [apiKeyMissing, setApiKeyMissing] = useState(false);
   
   // Chat State
   const [chatMessages, setChatMessages] = useState<FirestoreChatMessage[]>([]);
@@ -88,17 +90,29 @@ export function MissionSummary({
     libraries,
   });
 
+  // Check API key on mount
+  useEffect(() => {
+    setApiKeyMissing(!isGeminiConfigured());
+  }, []);
+
   // Get imageUrl from either photoURL or imageUrl field (from alerts collection)
+  // Use optional chaining to safely access nested properties
   const imageUrl = alert?.photoURL || (alert as unknown as { imageUrl?: string })?.imageUrl || null;
 
   // Analyze photo with AI when mission starts
   useEffect(() => {
     async function analyzePhoto() {
-      // Check if we have an imageUrl that's a base64 string
+      // Use optional chaining for safe access
       const photoUrl = alert?.photoURL || (alert as unknown as { imageUrl?: string })?.imageUrl;
+      
+      // Set loading complete once we've checked for the photo
+      setIsLoading(false);
+      
+      // Check if we have an imageUrl that's a base64 string (Data URI format)
       if (photoUrl && photoUrl.startsWith('data:image')) {
         setIsAnalyzing(true);
         try {
+          // Extract base64 data from Data URI
           const base64Data = photoUrl.split(',')[1];
           const triage = await analyzeMissionPhoto(base64Data);
           setAiTriage(triage);
@@ -109,8 +123,12 @@ export function MissionSummary({
         }
       }
     }
+    
     if (alert?.id) {
       analyzePhoto();
+    } else {
+      // No alert, still mark loading as complete
+      setIsLoading(false);
     }
   }, [alert?.id, alert?.photoURL]);
 
@@ -239,8 +257,8 @@ export function MissionSummary({
     }
   };
 
-  // Loading guard - show spinner if alert data is incomplete (AFTER all hooks)
-  if (!alert || !alert.id) {
+  // Loading guard - show spinner if alert data is incomplete or still loading (AFTER all hooks)
+  if (!alert || !alert?.id || isLoading) {
     return (
       <div className="p-6 flex items-center justify-center min-h-[400px]">
         <div className="flex flex-col items-center gap-4">
@@ -251,8 +269,24 @@ export function MissionSummary({
     );
   }
 
+  // API Key warning banner (shown after loading)
+  const ApiKeyWarning = apiKeyMissing ? (
+    <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-300 rounded-lg p-4 mb-4">
+      <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300">
+        <AlertTriangle className="h-5 w-5" />
+        <p className="font-medium">AI Analysis Unavailable</p>
+      </div>
+      <p className="text-sm text-amber-700 dark:text-amber-400 mt-1">
+        VITE_GEMINI_API_KEY is not configured. Add it to your environment variables to enable AI-powered disaster triage.
+      </p>
+    </div>
+  ) : null;
+
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
+      {/* API Key Warning */}
+      {ApiKeyWarning}
+      
       {/* Header */}
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={onClose}>

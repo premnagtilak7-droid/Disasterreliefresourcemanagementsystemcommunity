@@ -2,9 +2,21 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
 
-const genAI = new GoogleGenerativeAI(
-  import.meta.env.VITE_GEMINI_API_KEY || ""
-);
+// API Key validation with masked logging
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
+if (apiKey) {
+  const maskedKey = apiKey.slice(0, 6) + "..." + apiKey.slice(-4);
+  console.log("[v0] Gemini API Key loaded:", maskedKey);
+} else {
+  console.warn("[v0] VITE_GEMINI_API_KEY is NOT set - AI features will be disabled");
+}
+
+const genAI = new GoogleGenerativeAI(apiKey);
+
+// Export function to check API key status for UI
+export function isGeminiConfigured(): boolean {
+  return !!import.meta.env.VITE_GEMINI_API_KEY;
+}
 
 export interface TriageResult {
   category: "Medical" | "Food" | "Water" | "Shelter" | "Rescue" | "Other";
@@ -112,16 +124,16 @@ export interface VisionAnalysis {
 
 /**
  * Analyze a disaster photo using Gemini 1.5 Flash Vision
- * @param imageUrl - The Firebase Storage URL of the uploaded image
+ * @param imageUrl - The Firebase Storage URL of the uploaded image OR a base64 data URI
  */
 export async function analyzeDisasterPhoto(imageUrl: string): Promise<VisionAnalysis> {
   // Check if API key exists
   if (!import.meta.env.VITE_GEMINI_API_KEY) {
-    console.warn("VITE_GEMINI_API_KEY not set - skipping AI analysis");
+    console.warn("[v0] VITE_GEMINI_API_KEY not set - skipping AI analysis");
     return {
       severity: 5,
       primaryNeed: "Other",
-      description: "AI analysis unavailable - API key not configured",
+      description: "AI analysis unavailable - API key not configured. Please add VITE_GEMINI_API_KEY.",
       urgentDetails: "Manual assessment required",
       isFalseAlarm: false,
     };
@@ -129,18 +141,30 @@ export async function analyzeDisasterPhoto(imageUrl: string): Promise<VisionAnal
 
   try {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    let base64: string;
+    let mimeType: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
 
-    // Fetch the image as base64
-    const response = await fetch(imageUrl);
-    const blob = await response.blob();
-    const base64 = await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        resolve(result.split(',')[1]); // Remove data:image/...;base64, prefix
-      };
-      reader.readAsDataURL(blob);
-    });
+    // Check if this is already a base64 data URI
+    if (imageUrl.startsWith('data:image')) {
+      mimeType = detectMimeType(imageUrl);
+      base64 = extractBase64Data(imageUrl);
+      console.log("[v0] Using provided base64 data, mimeType:", mimeType);
+    } else {
+      // Fetch the image from URL as base64
+      console.log("[v0] Fetching image from URL for analysis");
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          resolve(reader.result as string);
+        };
+        reader.readAsDataURL(blob);
+      });
+      mimeType = detectMimeType(dataUrl);
+      base64 = extractBase64Data(dataUrl);
+    }
 
     const prompt = `You are a disaster relief AI analyst. FIRST determine if this is a REAL disaster photo or a FALSE ALARM.
 
@@ -171,13 +195,15 @@ Severity Guidelines (for REAL disasters only):
       prompt,
       {
         inlineData: {
-          mimeType: "image/jpeg",
+          mimeType: mimeType,
           data: base64,
         },
       },
     ]);
 
     const responseText = result.response.text();
+    console.log("[v0] Gemini Vision analysis complete");
+    
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     
     if (!jsonMatch) {
@@ -203,11 +229,11 @@ Severity Guidelines (for REAL disasters only):
 
     return analysis;
   } catch (error) {
-    console.error("Gemini Vision analysis error:", error);
+    console.error("[v0] Gemini Vision analysis error:", error);
     return {
       severity: 5,
       primaryNeed: "Other",
-      description: "Unable to analyze photo automatically",
+      description: "Unable to analyze photo - check API key and try again",
       urgentDetails: "Manual assessment required",
       isFalseAlarm: false,
     };
@@ -215,22 +241,63 @@ Severity Guidelines (for REAL disasters only):
 }
 
 /**
+ * Detect MIME type from base64 data or data URI
+ */
+function detectMimeType(base64Data: string): "image/jpeg" | "image/png" | "image/webp" | "image/gif" {
+  // Check for data URI prefix
+  if (base64Data.startsWith("data:image/png")) return "image/png";
+  if (base64Data.startsWith("data:image/webp")) return "image/webp";
+  if (base64Data.startsWith("data:image/gif")) return "image/gif";
+  if (base64Data.startsWith("data:image/jpeg") || base64Data.startsWith("data:image/jpg")) return "image/jpeg";
+  
+  // Check magic bytes in base64 (first few characters indicate file type)
+  const cleanBase64 = base64Data.includes(",") ? base64Data.split(",")[1] : base64Data;
+  
+  // PNG magic bytes: iVBORw0KGgo
+  if (cleanBase64.startsWith("iVBORw0KGgo")) return "image/png";
+  // GIF magic bytes: R0lGOD
+  if (cleanBase64.startsWith("R0lGOD")) return "image/gif";
+  // WebP magic bytes: UklGR
+  if (cleanBase64.startsWith("UklGR")) return "image/webp";
+  
+  // Default to JPEG (most common for photos)
+  return "image/jpeg";
+}
+
+/**
+ * Extract clean base64 data (without data URI prefix)
+ */
+function extractBase64Data(input: string): string {
+  if (input.includes(",")) {
+    return input.split(",")[1];
+  }
+  return input;
+}
+
+/**
  * Analyze a base64 image directly (for instant client-side analysis)
  * This is faster than waiting for Firebase upload
+ * Properly handles Base64 strings with correct mimeType detection for Gemini Vision
  */
 export async function analyzeBase64Photo(base64Data: string): Promise<VisionAnalysis> {
   // Check if API key exists
   if (!import.meta.env.VITE_GEMINI_API_KEY) {
-    console.warn("VITE_GEMINI_API_KEY not set - skipping AI analysis");
+    console.warn("[v0] VITE_GEMINI_API_KEY not set - skipping AI analysis");
     return {
       severity: 5,
       primaryNeed: "Other",
-      description: "AI analysis unavailable - API key not configured",
+      description: "AI analysis unavailable - API key not configured. Please add VITE_GEMINI_API_KEY to your environment variables.",
       isFalseAlarm: false,
     };
   }
 
   try {
+    // Detect mime type and extract clean base64 data
+    const mimeType = detectMimeType(base64Data);
+    const cleanBase64 = extractBase64Data(base64Data);
+    
+    console.log("[v0] Analyzing image with Gemini Vision, mimeType:", mimeType);
+
     // Use gemini-1.5-flash for fastest response
     const model = genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash",
@@ -252,13 +319,15 @@ Rules:
       prompt,
       {
         inlineData: {
-          mimeType: "image/jpeg",
-          data: base64Data,
+          mimeType: mimeType,
+          data: cleanBase64,
         },
       },
     ]);
 
     const responseText = result.response.text();
+    console.log("[v0] Gemini Vision response received");
+    
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     
     if (!jsonMatch) {
@@ -286,11 +355,11 @@ Rules:
     
     return analysis;
   } catch (error) {
-    console.error("Gemini base64 analysis error:", error);
+    console.error("[v0] Gemini base64 analysis error:", error);
     return {
       severity: 5,
       primaryNeed: "Other",
-      description: "Unable to analyze photo",
+      description: "Unable to analyze photo - check API key and try again",
       isFalseAlarm: false,
     };
   }
@@ -333,13 +402,15 @@ export interface MissionTriageResult {
 
 /**
  * Analyze a disaster photo for mission triage - provides equipment recommendations
+ * This is the "AI Prescription" - generates a Required Equipment Checklist based on visual triage
  */
 export async function analyzeMissionPhoto(base64Data: string): Promise<MissionTriageResult> {
   if (!import.meta.env.VITE_GEMINI_API_KEY) {
+    console.warn("[v0] VITE_GEMINI_API_KEY not set - using default mission triage");
     return {
       severity: 5,
       primaryNeed: "General Assistance",
-      description: "AI analysis unavailable - API key not configured",
+      description: "AI analysis unavailable - API key not configured. Please add VITE_GEMINI_API_KEY.",
       requiredEquipment: ["First aid kit", "Flashlight", "Water bottles"],
       safetyWarnings: ["Assess the situation before entering"],
       estimatedTimeToResolve: "30-60 minutes",
@@ -347,40 +418,61 @@ export async function analyzeMissionPhoto(base64Data: string): Promise<MissionTr
   }
 
   try {
+    // Detect mime type and extract clean base64
+    const mimeType = detectMimeType(base64Data);
+    const cleanBase64 = extractBase64Data(base64Data);
+    
+    console.log("[v0] Running Mission AI Triage with mimeType:", mimeType);
+
     const model = genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash",
       generationConfig: {
-        maxOutputTokens: 500,
+        maxOutputTokens: 600,
         temperature: 0.2,
       }
     });
 
-    const prompt = `You are a disaster relief AI assistant helping volunteers prepare for rescue missions.
-Analyze this disaster photo and provide detailed triage information.
+    // Enhanced prompt with "Required Equipment Checklist" prescription
+    const prompt = `You are an AI Disaster Relief Triage Specialist helping volunteers prepare for rescue missions.
+Analyze this disaster photo and provide a DETAILED visual triage with a REQUIRED EQUIPMENT CHECKLIST.
+
+Your job is to:
+1. IDENTIFY the type of disaster (flood, fire, collapse, medical emergency, etc.)
+2. ASSESS the severity based on visual cues
+3. PRESCRIBE the exact equipment the volunteer needs to bring
 
 Respond ONLY with a valid JSON object (no markdown):
 {
-  "severity": 1-10 (10 = most severe),
-  "primaryNeed": "Medical" | "Rescue" | "Food" | "Shelter" | "Water" | "Evacuation" | "Other",
-  "description": "Brief description of the situation (max 50 words)",
-  "requiredEquipment": ["list", "of", "equipment", "needed"],
-  "safetyWarnings": ["important", "safety", "precautions"],
-  "estimatedTimeToResolve": "estimated time to help"
+  "severity": 1-10 (10 = most severe, be specific based on what you see),
+  "primaryNeed": "Medical" | "Rescue" | "Food" | "Shelter" | "Water" | "Evacuation" | "Fire Response" | "Search & Rescue" | "Other",
+  "description": "Detailed visual triage - describe EXACTLY what you see in the disaster scene (max 60 words)",
+  "requiredEquipment": ["REQUIRED EQUIPMENT CHECKLIST - list 5-10 specific items the volunteer MUST bring based on what you see"],
+  "safetyWarnings": ["3-5 CRITICAL safety precautions based on the specific hazards visible"],
+  "estimatedTimeToResolve": "realistic time estimate based on disaster severity"
 }
 
-Equipment examples: First aid kit, stretcher, rope, flashlight, water bottles, blankets, fire extinguisher, crowbar, protective gloves, face mask, etc.`;
+EQUIPMENT CHECKLIST GUIDELINES (choose based on disaster type):
+- FLOOD: Wading boots, life jacket, rope (30m), waterproof flashlight, emergency whistle, dry bags, thermal blankets
+- FIRE: Fire extinguisher, N95 masks, fire-resistant gloves, wet towels, first aid burn kit, flashlight, fire blanket
+- COLLAPSE/EARTHQUAKE: Hard hat, crowbar, hydraulic jack, dust masks, work gloves, stretcher, trauma kit, flashlight
+- MEDICAL: First aid kit, AED if severe, stretcher, cervical collar, bandages, antiseptic, splints, oxygen if available
+- GENERAL: First aid kit, flashlight, water bottles, blankets, communication radio, rope, multi-tool, protective gloves
+
+Be SPECIFIC about equipment - don't just say "first aid kit", specify what's needed inside it based on injuries visible.`;
 
     const result = await model.generateContent([
       prompt,
       {
         inlineData: {
-          mimeType: "image/jpeg",
-          data: base64Data,
+          mimeType: mimeType,
+          data: cleanBase64,
         },
       },
     ]);
 
     const responseText = result.response.text();
+    console.log("[v0] Mission AI Triage complete");
+    
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     
     if (!jsonMatch) {
@@ -389,13 +481,13 @@ Equipment examples: First aid kit, stretcher, rope, flashlight, water bottles, b
 
     return JSON.parse(jsonMatch[0]) as MissionTriageResult;
   } catch (error) {
-    console.error("Mission triage error:", error);
+    console.error("[v0] Mission triage error:", error);
     return {
       severity: 5,
       primaryNeed: "General Assistance",
-      description: "Unable to analyze photo automatically",
-      requiredEquipment: ["First aid kit", "Flashlight", "Water bottles"],
-      safetyWarnings: ["Proceed with caution", "Assess situation before entering"],
+      description: "Unable to analyze photo - bring standard emergency kit",
+      requiredEquipment: ["First aid kit", "Flashlight", "Water bottles", "Protective gloves", "Emergency blanket"],
+      safetyWarnings: ["Proceed with caution", "Assess situation before entering", "Wear protective equipment"],
       estimatedTimeToResolve: "30-60 minutes",
     };
   }

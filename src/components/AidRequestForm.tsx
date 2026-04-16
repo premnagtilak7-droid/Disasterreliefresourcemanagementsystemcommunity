@@ -27,7 +27,7 @@ import {
 import { storage, db } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { analyzeBase64Photo, VisionAnalysis } from '@/lib/gemini';
+import { analyzeBase64Photo, VisionAnalysis, isGeminiConfigured } from '@/lib/gemini';
 import { toast } from 'sonner';
 
 interface AidRequestFormProps {
@@ -73,6 +73,9 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const [instantAnalysis, setInstantAnalysis] = useState<VisionAnalysis | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  
+  // Check if Gemini API key is configured
+  const geminiConfigured = isGeminiConfigured();
 
   // Compress image using canvas for faster Gemini analysis
   const compressImage = (file: File): Promise<string> => {
@@ -455,6 +458,14 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
             <CardDescription>
               Upload a photo of your situation. AI will analyze it to prioritize your request.
             </CardDescription>
+            {!geminiConfigured && (
+              <Alert className="mt-3 border-amber-300 bg-amber-50 dark:bg-amber-950/30">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertDescription className="text-amber-700 dark:text-amber-300">
+                  AI analysis unavailable - VITE_GEMINI_API_KEY not configured. Photos will still be uploaded but won&apos;t be analyzed.
+                </AlertDescription>
+              </Alert>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Hidden file inputs */}
