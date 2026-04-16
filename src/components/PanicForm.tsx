@@ -1,8 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { MapPin, Camera, Loader2, AlertTriangle, CheckCircle, Phone } from 'lucide-react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { MapPin, Camera, Loader2, AlertTriangle, CheckCircle, Phone, MessageSquare, User } from 'lucide-react';
+import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
 
@@ -20,9 +23,16 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
   const [isTakingPhoto, setIsTakingPhoto] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [assignedVolunteer, setAssignedVolunteer] = useState<string | null>(null);
+  
+  // New form fields
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [helpMessage, setHelpMessage] = useState('');
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-get location on mount
   useEffect(() => {
@@ -115,40 +125,111 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
     setIsTakingPhoto(false);
   };
 
+  // Handle file selection (converts to Base64)
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result as string;
+      setPhoto(base64String);
+      toast.success('Photo captured!');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Find nearest volunteer
+  const findNearestVolunteer = async (lat: number, lng: number): Promise<string | null> => {
+    try {
+      const volunteersQuery = query(
+        collection(db, 'users'),
+        where('role', '==', 'volunteer')
+      );
+      const snapshot = await getDocs(volunteersQuery);
+      
+      if (snapshot.empty) return null;
+      
+      let nearestVolunteer: string | null = null;
+      let nearestDistance = Infinity;
+      
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.latitude && data.longitude && data.name) {
+          const distance = calculateDistance(lat, lng, data.latitude, data.longitude);
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearestVolunteer = data.name;
+          }
+        }
+      });
+      
+      return nearestVolunteer || 'Nearby Volunteer';
+    } catch {
+      return 'Volunteer Team';
+    }
+  };
+
+  // Haversine formula for distance
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+  };
+
   const handleSubmitSOS = async () => {
     if (!location) {
       toast.error('Location is required for emergency SOS');
       return;
     }
 
+    if (!phoneNumber.trim()) {
+      toast.error('Phone number is required');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
+      // Find nearest volunteer for confirmation
+      const volunteerName = await findNearestVolunteer(location.lat, location.lng);
+      
       // Submit to emergency_alerts with CRITICAL priority
+      // Photo is stored as Base64 in imageUrl field
       await addDoc(collection(db, 'emergency_alerts'), {
         userId,
-        name: 'Anonymous Emergency',
-        phone: null,
+        name: 'Emergency Victim',
+        phone: phoneNumber.trim(),
         location: `${location.lat}, ${location.lng}`,
         latitude: location.lat,
         longitude: location.lng,
-        description: 'CRITICAL EMERGENCY - Anonymous SOS',
-        imageUrl: photo,
-        photoURL: photo,
+        description: helpMessage.trim() || 'CRITICAL EMERGENCY - SOS Alert',
+        helpMessage: helpMessage.trim(),
+        imageUrl: photo, // Base64 string stored here
+        photoURL: photo, // Also stored for compatibility
         emergencyType: 'CRITICAL SOS',
         status: 'pending',
         priority: 'CRITICAL',
-        isAnonymous: true,
+        isAnonymous: false,
         isCritical: true,
         bypassRadius: true, // Flag to show to all volunteers
         createdAt: serverTimestamp(),
       });
 
+      setAssignedVolunteer(volunteerName);
       setIsSubmitted(true);
       toast.success('Emergency SOS sent! Help is on the way.');
       
       if (onSuccess) {
-        setTimeout(onSuccess, 2000);
+        setTimeout(onSuccess, 3000);
       }
     } catch (error) {
       console.error('Failed to submit SOS:', error);
@@ -161,13 +242,24 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
   if (isSubmitted) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950 dark:to-green-900 flex items-center justify-center p-4">
-        <Card className="w-full max-w-md text-center">
+        <Card className="w-full max-w-md text-center border-green-200 dark:border-green-800">
           <CardContent className="pt-8 pb-8 space-y-6">
             <div className="mx-auto w-20 h-20 bg-green-100 dark:bg-green-900 rounded-full flex items-center justify-center">
               <CheckCircle className="h-12 w-12 text-green-600" />
             </div>
-            <div className="space-y-2">
-              <h2 className="text-2xl font-bold text-green-700 dark:text-green-400">SOS Sent!</h2>
+            <div className="space-y-3">
+              <h2 className="text-2xl font-bold text-green-700 dark:text-green-400">Help is on the way!</h2>
+              {assignedVolunteer && (
+                <div className="p-4 bg-green-50 dark:bg-green-950/50 rounded-lg border border-green-200 dark:border-green-800">
+                  <div className="flex items-center justify-center gap-2 text-green-700 dark:text-green-400">
+                    <User className="h-5 w-5" />
+                    <span className="font-semibold">{assignedVolunteer}</span>
+                  </div>
+                  <p className="text-sm text-green-600 dark:text-green-500 mt-1">
+                    is being notified of your emergency
+                  </p>
+                </div>
+              )}
               <p className="text-muted-foreground">
                 Your emergency alert has been broadcast to all nearby volunteers.
                 Stay calm and stay where you are if it is safe.
@@ -190,10 +282,10 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50 to-yellow-50 dark:from-red-950 dark:via-orange-950 dark:to-yellow-950 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50/50 to-yellow-50/30 dark:from-red-950 dark:via-orange-950 dark:to-yellow-950 flex items-center justify-center p-4">
       <Card className="w-full max-w-md border-red-200 dark:border-red-800">
         <CardHeader className="text-center pb-4">
-          <div className="mx-auto w-16 h-16 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center mb-4 animate-pulse">
+          <div className="mx-auto w-16 h-16 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center mb-4">
             <AlertTriangle className="h-10 w-10 text-red-600" />
           </div>
           <CardTitle className="text-2xl text-red-700 dark:text-red-400">Emergency SOS</CardTitle>
@@ -202,14 +294,14 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
           </CardDescription>
         </CardHeader>
         
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-5">
           {/* Location Section */}
-          <div className="space-y-3">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-medium flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-blue-600" />
+              <Label className="font-medium flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-blue-600" />
                 Location
-              </span>
+              </Label>
               {location && (
                 <span className="text-sm text-green-600 flex items-center gap-1">
                   <CheckCircle className="h-4 w-4" />
@@ -222,40 +314,68 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
               <p className="text-sm text-red-600">{locationError}</p>
             )}
             
-            {!location ? (
-              <Button 
-                onClick={handleGetLocation}
-                disabled={isGettingLocation}
-                className="w-full h-16 text-lg bg-blue-600 hover:bg-blue-700"
-              >
-                {isGettingLocation ? (
-                  <>
-                    <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                    Getting Location...
-                  </>
-                ) : (
-                  <>
-                    <MapPin className="h-5 w-5 mr-2" />
-                    Send My Location
-                  </>
-                )}
-              </Button>
-            ) : (
+            {isGettingLocation ? (
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/50 rounded-lg border border-blue-200 dark:border-blue-800 flex items-center justify-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                <span className="text-sm text-blue-700 dark:text-blue-400">Getting Location...</span>
+              </div>
+            ) : location ? (
               <div className="p-3 bg-green-50 dark:bg-green-950/50 rounded-lg border border-green-200 dark:border-green-800">
                 <p className="text-sm font-mono text-green-700 dark:text-green-400">
                   {location.lat.toFixed(6)}, {location.lng.toFixed(6)}
                 </p>
               </div>
+            ) : (
+              <Button 
+                onClick={handleGetLocation}
+                variant="outline"
+                className="w-full"
+              >
+                <MapPin className="h-4 w-4 mr-2" />
+                Get My Location
+              </Button>
             )}
           </div>
 
+          {/* Phone Number Field - Required */}
+          <div className="space-y-2">
+            <Label htmlFor="phone" className="font-medium flex items-center gap-2">
+              <Phone className="h-4 w-4 text-blue-600" />
+              Phone Number <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="phone"
+              type="tel"
+              placeholder="Enter your phone number"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              className="w-full"
+              required
+            />
+          </div>
+
+          {/* Help Message Field */}
+          <div className="space-y-2">
+            <Label htmlFor="helpMessage" className="font-medium flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-purple-600" />
+              Help Message
+            </Label>
+            <Textarea
+              id="helpMessage"
+              placeholder="Describe your emergency situation..."
+              value={helpMessage}
+              onChange={(e) => setHelpMessage(e.target.value)}
+              className="w-full min-h-[80px] resize-none"
+            />
+          </div>
+
           {/* Photo Section */}
-          <div className="space-y-3">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="font-medium flex items-center gap-2">
-                <Camera className="h-5 w-5 text-purple-600" />
+              <Label className="font-medium flex items-center gap-2">
+                <Camera className="h-4 w-4 text-purple-600" />
                 Photo (Optional)
-              </span>
+              </Label>
               {photo && (
                 <span className="text-sm text-green-600 flex items-center gap-1">
                   <CheckCircle className="h-4 w-4" />
@@ -264,13 +384,23 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
               )}
             </div>
 
+            {/* Hidden file input for fallback */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
             {isTakingPhoto ? (
               <div className="space-y-3">
                 <video 
                   ref={videoRef} 
                   autoPlay 
                   playsInline 
-                  className="w-full rounded-lg bg-black"
+                  className="w-full rounded-lg bg-black aspect-video object-cover"
                 />
                 <div className="flex gap-2">
                   <Button 
@@ -290,10 +420,11 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
               </div>
             ) : photo ? (
               <div className="space-y-2">
+                {/* Render Base64 photo as Data URI */}
                 <img 
                   src={photo} 
-                  alt="Captured" 
-                  className="w-full rounded-lg"
+                  alt="Captured disaster photo" 
+                  className="w-full rounded-lg max-h-48 object-cover"
                 />
                 <Button 
                   onClick={() => setPhoto(null)}
@@ -306,11 +437,18 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
               </div>
             ) : (
               <Button 
-                onClick={handleStartCamera}
+                onClick={() => {
+                  // Try camera API first, fallback to file input
+                  if (navigator.mediaDevices?.getUserMedia) {
+                    handleStartCamera();
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
                 variant="outline"
-                className="w-full h-14"
+                className="w-full"
               >
-                <Camera className="h-5 w-5 mr-2" />
+                <Camera className="h-4 w-4 mr-2" />
                 Snap Photo
               </Button>
             )}
@@ -321,17 +459,17 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
           {/* Submit Button */}
           <Button 
             onClick={handleSubmitSOS}
-            disabled={!location || isSubmitting}
-            className="w-full h-20 text-xl bg-red-600 hover:bg-red-700 animate-pulse disabled:animate-none"
+            disabled={!location || !phoneNumber.trim() || isSubmitting}
+            className="w-full h-14 text-lg bg-red-600 hover:bg-red-700 disabled:opacity-50"
           >
             {isSubmitting ? (
               <>
-                <Loader2 className="h-6 w-6 mr-2 animate-spin" />
-                Sending SOS...
+                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                Sending Help...
               </>
             ) : (
               <>
-                <AlertTriangle className="h-6 w-6 mr-2" />
+                <AlertTriangle className="h-5 w-5 mr-2" />
                 SEND EMERGENCY SOS
               </>
             )}
