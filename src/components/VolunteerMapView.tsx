@@ -17,6 +17,7 @@ import {
   calculateDistance,
   AlertWithId 
 } from '@/lib/alerts';
+import { playVolunteerAlarm, stopVolunteerAlarm, isAlarmActive } from '@/lib/audio';
 import { GoogleMap, useJsApiLoader, Marker, InfoWindow, Circle, Libraries } from '@react-google-maps/api';
 import { toast } from 'sonner';
 import { MissionSummary } from './MissionSummary';
@@ -51,6 +52,8 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
   const [activeMission, setActiveMission] = useState<AlertWithId | null>(null);
   const [mapReady, setMapReady] = useState(false);
   const [useLeaflet, setUseLeaflet] = useState(true); // Default to Leaflet (free, no API key needed)
+  const [alarmActive, setAlarmActive] = useState(false);
+  const [newAlertIds, setNewAlertIds] = useState<string[]>([]);
   const mapRef = useRef<google.maps.Map | null>(null);
   const previousAlertIdsRef = useRef<Set<string>>(new Set());
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -152,7 +155,7 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     }
   }, []);
 
-  // Subscribe to pending alerts from Firestore with notification
+  // Subscribe to pending alerts from Firestore with alarm notification
   useEffect(() => {
     const unsubscribe = subscribeToPendingAlerts((fetchedAlerts) => {
       // Check for new alerts
@@ -161,33 +164,63 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
       
       // Only notify if this isn't the initial load and there are new alerts
       if (previousAlertIdsRef.current.size > 0 && newAlerts.length > 0) {
+        const nearbyNewAlerts: string[] = [];
+        
         newAlerts.forEach(alert => {
-          // Check if within 2km of user
-          if (userLocation && alert.latitude && alert.longitude) {
-            const distance = calculateDistance(
-              userLocation.lat,
-              userLocation.lng,
-              alert.latitude,
-              alert.longitude
-            );
+          // CRITICAL alerts or alerts within 2km trigger the alarm
+          const isCritical = alert.priority === 'CRITICAL' || alert.isCritical || alert.bypassRadius;
+          
+          if (isCritical || (userLocation && alert.latitude && alert.longitude)) {
+            let shouldTrigger = isCritical;
             
-            if (distance <= RADIUS_KM) {
-              playBeep();
-              toast.error(`NEW SOS: ${alert.emergencyType || 'Emergency'} reported within 2km!`, {
-                duration: 8000,
-                icon: '🚨',
-              });
+            if (!shouldTrigger && userLocation && alert.latitude && alert.longitude) {
+              const distance = calculateDistance(
+                userLocation.lat,
+                userLocation.lng,
+                alert.latitude,
+                alert.longitude
+              );
+              shouldTrigger = distance <= RADIUS_KM;
+            }
+            
+            if (shouldTrigger) {
+              nearbyNewAlerts.push(alert.id);
             }
           }
         });
+        
+        // If there are nearby new alerts, trigger continuous alarm
+        if (nearbyNewAlerts.length > 0) {
+          setNewAlertIds(prev => [...prev, ...nearbyNewAlerts]);
+          setAlarmActive(true);
+          playVolunteerAlarm();
+          
+          toast.error(
+            <div className="flex flex-col gap-2">
+              <span className="font-bold">NEW EMERGENCY ALERT!</span>
+              <span>{nearbyNewAlerts.length} new SOS{nearbyNewAlerts.length > 1 ? 's' : ''} detected</span>
+              <span className="text-xs">Click Acknowledge to silence alarm</span>
+            </div>,
+            {
+              duration: Infinity,
+              icon: '🚨',
+            }
+          );
+        }
       }
       
       previousAlertIdsRef.current = currentIds;
       setAlerts(fetchedAlerts);
     });
 
-    return () => unsubscribe();
-  }, [userLocation, playBeep]);
+    return () => {
+      unsubscribe();
+      // Stop alarm when component unmounts
+      if (isAlarmActive()) {
+        stopVolunteerAlarm();
+      }
+    };
+  }, [userLocation]);
 
   // Filter alerts within 2km radius (CRITICAL alerts bypass radius filter)
   useEffect(() => {
@@ -235,7 +268,23 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
     });
   }, []);
 
+  // Stop alarm and acknowledge alerts
+  const handleAcknowledgeAlarm = () => {
+    stopVolunteerAlarm();
+    setAlarmActive(false);
+    setNewAlertIds([]);
+    toast.dismiss(); // Dismiss alarm toasts
+    toast.success('Alarm acknowledged. Review alerts below.');
+  };
+
   const handleStartMission = (alert: AlertWithId) => {
+    // Stop alarm when starting a mission
+    if (alarmActive) {
+      stopVolunteerAlarm();
+      setAlarmActive(false);
+      setNewAlertIds([]);
+      toast.dismiss();
+    }
     setActiveMission(alert);
     setSelectedAlert(null);
   };
@@ -311,6 +360,29 @@ export function VolunteerMapView({ userId }: VolunteerMapViewProps) {
           {nearbyAlerts.length} alert{nearbyAlerts.length !== 1 ? 's' : ''} nearby
         </Badge>
       </div>
+
+      {/* Alarm Active Banner */}
+      {alarmActive && (
+        <Card className="border-red-500 bg-red-100 dark:bg-red-950 animate-pulse">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-6 w-6 text-red-600 animate-bounce" />
+              <div>
+                <p className="text-red-800 dark:text-red-200 font-bold">EMERGENCY ALERT - ALARM ACTIVE</p>
+                <p className="text-red-700 dark:text-red-300 text-sm">
+                  {newAlertIds.length} new alert{newAlertIds.length > 1 ? 's' : ''} detected nearby
+                </p>
+              </div>
+            </div>
+            <Button 
+              onClick={handleAcknowledgeAlarm}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Acknowledge Alarm
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {locationError && (
         <Card className="border-yellow-200 bg-yellow-50">

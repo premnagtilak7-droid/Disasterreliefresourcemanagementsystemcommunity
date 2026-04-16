@@ -33,6 +33,50 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Play confirmation chirp sound when SOS is successfully sent
+  const playConfirmationChirp = () => {
+    try {
+      // Create or reuse AudioContext
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      }
+      const audioContext = audioContextRef.current;
+      
+      // Resume audio context if suspended (browser autoplay policy)
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+
+      // Create a confirmation chirp (2-second ascending tone)
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Chirp pattern: ascending frequency
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+      oscillator.frequency.linearRampToValueAtTime(800, audioContext.currentTime + 0.3);
+      oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.4);
+      oscillator.frequency.linearRampToValueAtTime(1000, audioContext.currentTime + 0.7);
+      oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.8);
+      oscillator.frequency.linearRampToValueAtTime(1200, audioContext.currentTime + 1.1);
+      
+      // Volume envelope
+      gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.6, audioContext.currentTime + 0.5);
+      gainNode.gain.linearRampToValueAtTime(0.4, audioContext.currentTime + 1.5);
+      gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 2);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 2);
+    } catch (error) {
+      console.error('Failed to play confirmation sound:', error);
+    }
+  };
 
   // Auto-get location on mount
   useEffect(() => {
@@ -226,6 +270,10 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
 
       setAssignedVolunteer(volunteerName);
       setIsSubmitted(true);
+      
+      // Play confirmation chirp so victim knows SOS was sent
+      playConfirmationChirp();
+      
       toast.success('Emergency SOS sent! Help is on the way.');
       
       if (onSuccess) {
@@ -475,16 +523,7 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
             )}
           </Button>
 
-          {/* Back Link */}
-          {onBack && (
-            <Button 
-              onClick={onBack}
-              variant="ghost"
-              className="w-full text-muted-foreground"
-            >
-              Back to Login
-            </Button>
-          )}
+          {/* No back button - Panic mode is locked until SOS is sent */}
 
           {/* Emergency Call */}
           <div className="pt-4 border-t text-center">

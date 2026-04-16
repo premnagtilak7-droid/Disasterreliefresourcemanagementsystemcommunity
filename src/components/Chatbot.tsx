@@ -17,9 +17,12 @@ import {
   Package,
   Users,
   Minimize2,
-  Maximize2
+  Maximize2,
+  Loader2
 } from 'lucide-react';
 import { User as UserType } from './AuthSystem';
+import { isGeminiConfigured } from '@/lib/gemini';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 interface Message {
   id: string;
@@ -64,7 +67,9 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [geminiAvailable] = useState(isGeminiConfigured());
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const chatHistoryRef = useRef<{ role: string; content: string }[]>([]);
 
   useEffect(() => {
     if (isOpen && messages.length === 0) {
@@ -178,7 +183,69 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
     return helpText[userRole] || "Navigate using the menu at the top of the screen.";
   };
 
-  const generateBotResponse = (userMessage: string): string => {
+  /**
+   * Generate bot response using Gemini AI as Emergency Dispatcher
+   * Falls back to local responses if Gemini is unavailable
+   */
+  const generateBotResponse = async (userMessage: string): Promise<string> => {
+    // If Gemini is available, use it for AI-powered responses
+    if (geminiAvailable) {
+      try {
+        const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+        const model = genAI.getGenerativeModel({ 
+          model: "gemini-1.5-flash",
+          generationConfig: {
+            maxOutputTokens: 300,
+            temperature: 0.7,
+          }
+        });
+
+        // Build context from chat history
+        const historyContext = chatHistoryRef.current
+          .slice(-6) // Last 6 messages for context
+          .map(m => `${m.role === 'user' ? 'Victim' : 'Dispatcher'}: ${m.content}`)
+          .join('\n');
+
+        const systemPrompt = `You are an EMERGENCY DISPATCHER AI for a Disaster Relief app. Your role is critical:
+
+1. IMMEDIATE FIRST AID ADVICE - Provide clear, step-by-step first aid instructions
+2. SAFETY GUIDANCE - Tell victims how to stay safe while waiting for rescue
+3. EMOTIONAL SUPPORT - Stay calm, reassuring, and empathetic
+4. TRIAGE QUESTIONS - Ask about injuries, location safety, number of people affected
+5. SURVIVAL TIPS - Basic survival advice (staying hydrated, signaling rescuers, etc.)
+
+CRITICAL RULES:
+- If someone mentions life-threatening injury, IMMEDIATELY say: "CALL 112 NOW if you haven't already."
+- Keep responses concise (under 150 words) but helpful
+- Use clear, simple language - victim may be in shock
+- Ask clarifying questions to better assist
+- Provide actionable steps, not just sympathy
+
+User Role: ${user?.role || 'victim'}
+User Name: ${user?.name || 'Unknown'}
+
+Recent Chat:
+${historyContext}
+
+Victim's Message: ${userMessage}
+
+Respond as Emergency Dispatcher:`;
+
+        const result = await model.generateContent(systemPrompt);
+        const response = result.response.text();
+        
+        // Update chat history
+        chatHistoryRef.current.push({ role: 'user', content: userMessage });
+        chatHistoryRef.current.push({ role: 'assistant', content: response });
+        
+        return response;
+      } catch (error) {
+        console.error('Gemini chatbot error:', error);
+        // Fall through to local response
+      }
+    }
+
+    // Fallback: Local keyword-based responses
     const lowerMessage = userMessage.toLowerCase();
 
     // Emergency keywords
@@ -187,8 +254,8 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
     }
 
     // Medical keywords
-    if (lowerMessage.includes('medical') || lowerMessage.includes('doctor') || lowerMessage.includes('hospital')) {
-      return emergencyResponses.medical;
+    if (lowerMessage.includes('medical') || lowerMessage.includes('doctor') || lowerMessage.includes('hospital') || lowerMessage.includes('hurt') || lowerMessage.includes('bleeding') || lowerMessage.includes('injury')) {
+      return "🏥 FIRST AID PRIORITY:\n\n1. If bleeding: Apply direct pressure with clean cloth\n2. If unconscious: Check breathing, place in recovery position\n3. If chest pain: Call 112 immediately, chew aspirin if available\n4. Stay calm and keep the injured person warm\n\nFor severe injuries, call 112 NOW. A volunteer is being dispatched to your location.";
     }
 
     // Food keywords
@@ -197,8 +264,8 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
     }
 
     // Shelter keywords
-    if (lowerMessage.includes('shelter') || lowerMessage.includes('housing') || lowerMessage.includes('homeless')) {
-      return emergencyResponses.shelter;
+    if (lowerMessage.includes('shelter') || lowerMessage.includes('housing') || lowerMessage.includes('homeless') || lowerMessage.includes('trapped')) {
+      return "🏠 SHELTER & SAFETY:\n\n1. If trapped: Stay calm, make noise periodically to alert rescuers\n2. If building is unstable: Move away from windows, find doorframe or sturdy furniture\n3. If outdoors: Find high ground away from power lines\n\nA volunteer is being notified. Stay where you are if safe.";
     }
 
     // Volunteer keywords
@@ -222,15 +289,15 @@ export function Chatbot({ user, onNavigate }: ChatbotProps) {
     }
 
     // Default response with helpful suggestions
-    return `I understand you're looking for help with "${userMessage}". Here are some things I can assist with:
+    return `I'm your Emergency Dispatcher. I'm here to help you stay safe while rescue is on the way.
 
-🚨 Emergency assistance and contacts
-📍 Finding resources and locations  
-📋 Navigating the system features
-💝 Donation and volunteer opportunities
-📊 Tracking requests and status updates
+Tell me more about your situation:
+🚨 Are you or anyone injured?
+📍 Is your current location safe?
+👥 How many people are with you?
+🏠 What type of emergency are you facing?
 
-What specifically would you like help with?`;
+For life-threatening emergencies, CALL 112 immediately.`;
   };
 
   const addBotMessage = (content: string, actions?: ChatAction[]) => {
@@ -244,13 +311,14 @@ What specifically would you like help with?`;
     setMessages(prev => [...prev, message]);
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
 
+    const userMessageContent = inputValue.trim();
     const userMessage: Message = {
       id: Date.now().toString(),
       type: 'user',
-      content: inputValue,
+      content: userMessageContent,
       timestamp: new Date()
     };
 
@@ -258,12 +326,16 @@ What specifically would you like help with?`;
     setInputValue('');
     setIsTyping(true);
 
-    // Simulate typing delay
-    setTimeout(() => {
-      const botResponse = generateBotResponse(inputValue);
+    try {
+      // Get AI response (may take a moment if using Gemini)
+      const botResponse = await generateBotResponse(userMessageContent);
       addBotMessage(botResponse);
+    } catch (error) {
+      console.error('Failed to get bot response:', error);
+      addBotMessage("I'm having trouble responding right now. For emergencies, call 112.");
+    } finally {
       setIsTyping(false);
-    }, 1000);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -292,10 +364,14 @@ What specifically would you like help with?`;
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
         <div className="flex items-center space-x-2">
           <Bot className="h-5 w-5 text-blue-600" />
-          <CardTitle className="text-lg">Relief Assistant</CardTitle>
-          {user && (
+          <CardTitle className="text-lg">Emergency Dispatcher</CardTitle>
+          {geminiAvailable ? (
+            <Badge variant="default" className="text-xs bg-green-600">
+              AI Active
+            </Badge>
+          ) : (
             <Badge variant="outline" className="text-xs">
-              {user.role}
+              Offline
             </Badge>
           )}
         </div>
@@ -391,12 +467,21 @@ What specifically would you like help with?`;
                 <div className="flex justify-start">
                   <div className="max-w-[80%] rounded-lg p-3 bg-muted">
                     <div className="flex items-center space-x-2">
-                      <Bot className="h-4 w-4" />
-                      <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
-                        <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-                      </div>
+                      {geminiAvailable ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                          <span className="text-sm text-muted-foreground">Dispatcher responding...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Bot className="h-4 w-4" />
+                          <div className="flex space-x-1">
+                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" />
+                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                            <div className="w-2 h-2 bg-muted-foreground rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
