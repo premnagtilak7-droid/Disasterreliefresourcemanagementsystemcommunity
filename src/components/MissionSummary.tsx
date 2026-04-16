@@ -262,8 +262,11 @@ export function MissionSummary({
     return (
       <div className="p-6 flex items-center justify-center min-h-[400px]">
         <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-          <p className="text-muted-foreground">Loading mission details...</p>
+          <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+          <div className="text-center">
+            <p className="font-medium text-lg">Syncing Mission Data...</p>
+            <p className="text-sm text-muted-foreground mt-1">Fetching alert details from Firestore</p>
+          </div>
         </div>
       </div>
     );
@@ -287,11 +290,15 @@ export function MissionSummary({
       {/* API Key Warning */}
       {ApiKeyWarning}
       
-      {/* Header */}
+      {/* Header with Back Navigation */}
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={onClose}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Map
+        <Button 
+          variant="outline" 
+          onClick={onClose}
+          className="flex items-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800"
+        >
+          <ArrowLeft className="h-5 w-5" />
+          <span className="font-medium">Back to Map</span>
         </Button>
         <Badge variant="destructive" className="text-lg px-4 py-1">
           Active Mission
@@ -369,12 +376,20 @@ export function MissionSummary({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Base64 image rendered as Data URI */}
           {imageUrl ? (
-            <img 
-              src={imageUrl} 
-              alt="Disaster scene" 
-              className="w-full max-h-64 object-cover rounded-lg border"
-            />
+            <div className="relative">
+              <img 
+                src={imageUrl} 
+                alt="Disaster scene photo from victim" 
+                className="w-full max-h-72 object-cover rounded-lg border-2 border-slate-200 dark:border-slate-700"
+              />
+              {imageUrl.startsWith('data:image') && (
+                <Badge variant="secondary" className="absolute top-2 right-2 text-xs">
+                  Base64 Photo
+                </Badge>
+              )}
+            </div>
           ) : (
             <div className="w-full h-48 bg-gray-100 dark:bg-gray-800 rounded-lg border flex items-center justify-center">
               <div className="text-center text-muted-foreground">
@@ -431,14 +446,14 @@ export function MissionSummary({
           </CardContent>
         </Card>
 
-        {/* AI Mission Triage - Equipment Recommendations */}
+        {/* AI Tactical Guidance - Equipment Checklist */}
         <Card className="border-blue-200 bg-blue-50 dark:bg-blue-950/30">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
             <Package className="h-5 w-5" />
-            AI Mission Triage
+            AI Tactical Guidance
           </CardTitle>
-          <CardDescription>Equipment and safety recommendations from AI</CardDescription>
+          <CardDescription>Required Equipment Checklist based on visual triage from Gemini 1.5 Flash</CardDescription>
         </CardHeader>
         <CardContent>
           {isAnalyzing ? (
@@ -468,17 +483,21 @@ export function MissionSummary({
                 <p className="text-sm">{aiTriage?.description ?? 'No description available'}</p>
               </div>
 
-              <div>
-                <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2 flex items-center gap-1">
-                  <Package className="h-4 w-4" />
-                  Required Equipment
+              <div className="bg-white dark:bg-slate-900 rounded-lg p-4 border border-blue-200">
+                <p className="text-base font-semibold text-blue-800 dark:text-blue-300 mb-3 flex items-center gap-2">
+                  <Package className="h-5 w-5" />
+                  Required Equipment Checklist
                 </p>
                 <div className="flex flex-wrap gap-2">
-                  {(aiTriage?.requiredEquipment ?? []).map((item, idx) => (
-                    <Badge key={idx} variant="outline" className="bg-white dark:bg-slate-900">
-                      {item}
-                    </Badge>
-                  ))}
+                  {(aiTriage?.requiredEquipment ?? []).length > 0 ? (
+                    (aiTriage?.requiredEquipment ?? []).map((item, idx) => (
+                      <Badge key={idx} variant="secondary" className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 px-3 py-1">
+                        {item}
+                      </Badge>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Standard emergency kit recommended</p>
+                  )}
                 </div>
               </div>
 
