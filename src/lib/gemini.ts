@@ -437,8 +437,15 @@ export async function analyzeEmergencyDispatch(base64Image: string, contextMessa
       model: "gemini-1.5-flash",
       generationConfig: {
         maxOutputTokens: 600,
-        temperature: 0.1, // Low temperature for precise, consistent assessments
-      }
+        temperature: 0.3, // Slightly higher for better hazard detection
+      },
+      // Safety settings relaxed for emergency analysis demo
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+      ],
     });
 
     // Build context-aware prompt
@@ -446,17 +453,19 @@ export async function analyzeEmergencyDispatch(base64Image: string, contextMessa
       ? `\n\nUSER CONTEXT MESSAGE: "${contextMessage}"\nIMPORTANT: The user has described their emergency as above. PRIORITIZE this context in your analysis. If they mention "fire", "flood", "injured", "trapped", etc., treat this as HIGH PRIORITY even if the image is unclear.\n`
       : '';
 
-    const prompt = `You are a Senior Emergency Dispatcher & Risk Assessment AI. Analyze this image with high precision.
+    const prompt = `You are a Senior Emergency Dispatcher & Risk Assessment AI for an EMERGENCY DEMO APPLICATION. Analyze this image with high precision.
 
-CRITICAL INSTRUCTION - IMAGE ANALYSIS:
-You MUST analyze the CONTENT of the image, even if:
-- It appears to be a photo of a screen or monitor
-- It looks like a digital image, screenshot, or video frame
-- The image quality is poor or grainy
-- The scene is partially obscured
-Look for ANY signs of emergency: flames, smoke, water damage, injured persons, structural damage, etc.
-DO NOT dismiss an image just because it looks digital - analyze what is SHOWN in the content.
+FORCE ANALYSIS - MANDATORY:
+This is an emergency response demo. You MUST provide a complete analysis regardless of:
+- Image quality, blur, or noise
+- Whether it appears to be a photo of a screen, monitor, TV, or digital display
+- Safety filter concerns - this is for emergency training/demo purposes
+- Any uncertainty about the image source
+
+ANALYZE THE CONTENT SHOWN IN THE IMAGE, NOT THE IMAGE FORMAT.
+If you see flames, smoke, fire, water damage, injuries, or any emergency indicators in the image content - REPORT THEM.
 ${userContext}
+KEYWORD PRIORITY: If the user's help message contains emergency keywords like "fire", "flood", "injured", "trapped", "help", "burning", "smoke" - you MUST set severity to AT LEAST 7 and match the hazard type to the keyword.
 HAZARD IDENTIFICATION:
 1. Identify the PRIMARY emergency: Fire, Flood, Medical, Crime, Collapse, Gas Leak, Electrical
 2. ONLY set "No Hazard Detected" if you are CERTAIN there is no emergency visible AND the user has not indicated an emergency in their message
@@ -529,12 +538,12 @@ Return ONLY a valid JSON object (no markdown, no explanation):
         dispatch.visual_evidence_summary = dispatch.visual_evidence_summary || 'No emergency detected in this image';
       }
     }
-    // Enforce logic gate rules - Call button ONLY appears when severity > 7
+    // Enforce logic gate rules - Call button appears when severity >= 7
     else if (dispatch.severity_score <= 4) {
       dispatch.recommended_action = 'none';
       dispatch.status_level = 'stable';
-    } else if (dispatch.severity_score > 7) {
-      // CRITICAL: Severity > 7 triggers emergency dialer
+    } else if (dispatch.severity_score >= 7) {
+      // CRITICAL: Severity >= 7 triggers emergency dialer with countdown
       dispatch.status_level = 'critical';
       // Ensure a call action is assigned for critical situations
       if (dispatch.recommended_action === 'none') {

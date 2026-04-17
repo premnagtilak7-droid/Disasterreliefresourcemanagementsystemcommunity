@@ -36,6 +36,8 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
   const [dispatchResult, setDispatchResult] = useState<EmergencyDispatchResult | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [autoCallCountdown, setAutoCallCountdown] = useState<number | null>(null);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -201,6 +203,52 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
     reader.readAsDataURL(file);
   };
 
+  // Start 3-second countdown for auto-call
+  const startAutoCallCountdown = (emergencyNumber: string) => {
+    // Clear any existing countdown
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+    }
+    
+    setAutoCallCountdown(3);
+    
+    countdownRef.current = setInterval(() => {
+      setAutoCallCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          // Countdown finished - trigger the call
+          if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+          }
+          // Execute the emergency call
+          console.log(`[v0] AUTO-CALL TRIGGERED: tel:${emergencyNumber}`);
+          window.open(`tel:${emergencyNumber}`, '_self');
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Cancel the auto-call countdown
+  const cancelAutoCall = () => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    setAutoCallCountdown(null);
+    toast.info('Auto-call cancelled. You can call manually if needed.');
+  };
+
+  // Cleanup countdown on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
+      }
+    };
+  }, []);
+
   // Analyze photo with Emergency Dispatcher AI - passes helpMessage as context
   const analyzePhotoWithAI = async (base64Image: string) => {
     setIsAnalyzing(true);
@@ -226,12 +274,17 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
         return;
       }
       
-      // Show popup modal ONLY if severity > 7 (triggers emergency dialer)
-      if (result.severity_score > 7 && result.recommended_action !== 'none') {
-        console.log('[v0] CRITICAL HAZARD (Severity > 7) - Showing emergency call modal');
+      // Show popup modal and start countdown if severity >= 7 (triggers emergency dialer)
+      if (result.severity_score >= 7 && result.recommended_action !== 'none') {
+        console.log('[v0] CRITICAL HAZARD (Severity >= 7) - Starting 3-second auto-call countdown');
         setShowEmergencyModal(true);
-        toast.error(`CRITICAL: ${result.hazard_type} detected! Severity ${result.severity_score}/10 - Call ${result.authority_assigned}!`, {
-          duration: 10000,
+        
+        // Start the 3-second countdown for auto-call
+        const emergencyNumber = result.recommended_action.replace('call_', '');
+        startAutoCallCountdown(emergencyNumber);
+        
+        toast.error(`CRITICAL: ${result.hazard_type} detected! Auto-calling ${result.authority_assigned} in 3 seconds...`, {
+          duration: 5000,
         });
       } else if (result.hazard_type === 'No Hazard Detected') {
         toast.success('No hazard detected in this image');
@@ -417,27 +470,28 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50/50 to-yellow-50/30 dark:from-red-950 dark:via-orange-950 dark:to-yellow-950 flex items-center justify-center p-4">
-      {/* Emergency Call Modal - Only shows when severity > 7 */}
-      {showEmergencyModal && dispatchResult && dispatchResult.severity_score > 7 && dispatchResult.recommended_action !== 'none' && (
-        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-sm border-red-500 border-2 bg-white dark:bg-slate-900 animate-pulse">
+      {/* Emergency Call Modal - Shows when severity >= 7 with auto-call countdown */}
+      {showEmergencyModal && dispatchResult && dispatchResult.severity_score >= 7 && dispatchResult.recommended_action !== 'none' && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm border-red-500 border-4 bg-white dark:bg-slate-900">
             <CardHeader className="bg-red-600 text-white rounded-t-lg">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Siren className="h-6 w-6 animate-bounce" />
-                  <CardTitle>AI DETECTED CRITICAL HAZARD</CardTitle>
+                  <CardTitle className="text-lg">CRITICAL HAZARD DETECTED</CardTitle>
                 </div>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => setShowEmergencyModal(false)}
-                  className="text-white hover:bg-red-700"
-                >
-                  <X className="h-5 w-5" />
-                </Button>
               </div>
             </CardHeader>
             <CardContent className="p-6 space-y-4">
+              {/* Countdown Display */}
+              {autoCallCountdown !== null && (
+                <div className="text-center py-4 bg-red-100 dark:bg-red-900/50 rounded-lg border-2 border-red-500 animate-pulse">
+                  <p className="text-sm text-red-700 dark:text-red-300 font-medium">AUTO-CALLING IN</p>
+                  <p className="text-6xl font-bold text-red-600">{autoCallCountdown}</p>
+                  <p className="text-xs text-red-600 dark:text-red-400">seconds</p>
+                </div>
+              )}
+
               <div className="text-center space-y-2">
                 <Badge className="bg-red-600 text-lg px-4 py-1">
                   {dispatchResult.hazard_type}
@@ -445,35 +499,50 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
                 <p className="text-2xl font-bold">
                   Severity: {dispatchResult.severity_score}/10
                 </p>
-                <p className="text-muted-foreground">
+                <p className="text-muted-foreground text-sm">
                   {dispatchResult.visual_evidence_summary}
                 </p>
               </div>
               
-              <div className="bg-red-50 dark:bg-red-950/50 p-4 rounded-lg border border-red-200">
-                <p className="text-sm text-red-700 dark:text-red-300 mb-2 font-medium">
-                  Recommended: Call {dispatchResult.authority_assigned}
+              <div className="bg-red-50 dark:bg-red-950/50 p-3 rounded-lg border border-red-200">
+                <p className="text-sm text-red-700 dark:text-red-300 font-medium text-center">
+                  Calling: {dispatchResult.authority_assigned}
                 </p>
               </div>
 
+              {/* Call Now Button */}
               <a
                 href={`tel:${getEmergencyNumber(dispatchResult.recommended_action)}`}
                 className="block w-full"
               >
                 <Button 
-                  className="w-full h-16 text-xl bg-red-600 hover:bg-red-700 animate-pulse"
+                  className="w-full h-14 text-lg bg-red-600 hover:bg-red-700"
                 >
-                  <Phone className="h-6 w-6 mr-3" />
-                  CALL {getEmergencyLabel(dispatchResult.recommended_action)}
+                  <Phone className="h-5 w-5 mr-2" />
+                  CALL NOW: {getEmergencyNumber(dispatchResult.recommended_action)}
                 </Button>
               </a>
 
+              {/* Cancel Auto-Call Button */}
+              {autoCallCountdown !== null && (
+                <Button 
+                  variant="outline" 
+                  className="w-full border-red-300 text-red-700 hover:bg-red-50"
+                  onClick={cancelAutoCall}
+                >
+                  Cancel Auto-Call
+                </Button>
+              )}
+
               <Button 
-                variant="outline" 
-                className="w-full"
-                onClick={() => setShowEmergencyModal(false)}
+                variant="ghost" 
+                className="w-full text-muted-foreground"
+                onClick={() => {
+                  cancelAutoCall();
+                  setShowEmergencyModal(false);
+                }}
               >
-                I&apos;ll call manually later
+                Dismiss
               </Button>
             </CardContent>
           </Card>
@@ -673,8 +742,8 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
                       <p className="text-muted-foreground text-xs">{dispatchResult.visual_evidence_summary}</p>
                     </div>
                     
-                    {/* Call Now Button - ONLY appears when severity > 7 */}
-                    {dispatchResult.severity_score > 7 && dispatchResult.recommended_action !== 'none' && (
+                    {/* Call Now Button - ONLY appears when severity >= 7 */}
+                    {dispatchResult.severity_score >= 7 && dispatchResult.recommended_action !== 'none' && (
                       <a href={`tel:${getEmergencyNumber(dispatchResult.recommended_action)}`} className="block w-full mt-2">
                         <Button 
                           className="w-full bg-red-600 hover:bg-red-700"
