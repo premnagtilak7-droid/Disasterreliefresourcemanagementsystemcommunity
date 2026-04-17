@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { User } from './AuthSystem';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
@@ -22,7 +22,8 @@ import {
   Camera,
   Upload,
   Loader2,
-  X
+  X,
+  Siren
 } from 'lucide-react';
 import { storage, db } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -72,8 +73,62 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [instantAnalysis, setInstantAnalysis] = useState<VisionAnalysis | null>(null);
   const [emergencyDispatch, setEmergencyDispatch] = useState<EmergencyDispatchResult | null>(null);
+  const [autoCallCountdown, setAutoCallCountdown] = useState<number | null>(null);
+  const [showAutoCallModal, setShowAutoCallModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get emergency number based on recommended action
+  const getEmergencyNumber = (action: string): string => {
+    switch (action) {
+      case 'call_101': return '101';
+      case 'call_102': return '102';
+      case 'call_100': return '100';
+      default: return '112';
+    }
+  };
+
+  // Start 2-second countdown then auto-trigger dialer
+  const startAutoCallCountdown = (emergencyNumber: string) => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    
+    setAutoCallCountdown(2);
+    setShowAutoCallModal(true);
+    
+    countdownRef.current = setInterval(() => {
+      setAutoCallCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+          }
+          // Auto-trigger the dialer
+          window.location.href = `tel:${emergencyNumber}`;
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Cancel auto-call
+  const cancelAutoCall = () => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    setAutoCallCountdown(null);
+    setShowAutoCallModal(false);
+    toast.info('Auto-call cancelled');
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
   
   // Check if Gemini API key is configured
   const geminiConfigured = isGeminiConfigured();
@@ -134,10 +189,10 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
         const compressed = await compressImage(file);
         setCompressedBase64(compressed);
         
-        // Run both analyses in parallel for comprehensive assessment
+        // Run both analyses in parallel - pass description text for context priority
         const [basicAnalysis, dispatchAnalysis] = await Promise.all([
           analyzeBase64Photo(compressed),
-          analyzeEmergencyDispatch(compressed)
+          analyzeEmergencyDispatch(compressed, formData.description) // Pass user's text description
         ]);
         
         setInstantAnalysis(basicAnalysis);
@@ -148,10 +203,15 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
           toast.warning('AI analysis unavailable - photo will still be uploaded');
         } else if (basicAnalysis.isFalseAlarm) {
           toast.error(`False Alarm Detected: ${basicAnalysis.falseAlarmReason || 'Not a disaster image'}`);
-        } else if (dispatchAnalysis.status_level === 'critical') {
-          toast.error(`CRITICAL: ${dispatchAnalysis.hazard_type} - Call ${dispatchAnalysis.authority_assigned}!`, {
-            duration: 10000,
+        } else if (dispatchAnalysis.severity_score >= 7 && dispatchAnalysis.recommended_action !== 'none') {
+          // Severity >= 7: Start 2-second auto-call countdown
+          const emergencyNumber = getEmergencyNumber(dispatchAnalysis.recommended_action);
+          toast.error(`CRITICAL: ${dispatchAnalysis.hazard_type} - Auto-calling ${dispatchAnalysis.authority_assigned} in 2s!`, {
+            duration: 5000,
           });
+          startAutoCallCountdown(emergencyNumber);
+        } else if (dispatchAnalysis.status_level === 'monitoring') {
+          toast.warning(`${dispatchAnalysis.hazard_type} detected - Severity ${dispatchAnalysis.severity_score}/10`);
         } else {
           toast.success(`AI Analysis: ${dispatchAnalysis.hazard_type} - Severity ${dispatchAnalysis.severity_score}/10`);
         }
@@ -337,6 +397,48 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
+      {/* Auto-Call Modal - Severity >= 7 */}
+      {showAutoCallModal && emergencyDispatch && emergencyDispatch.severity_score >= 7 && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm border-red-500 border-4 bg-white dark:bg-slate-900">
+            <CardHeader className="bg-red-600 text-white rounded-t-lg">
+              <div className="flex items-center gap-2">
+                <Siren className="h-6 w-6 animate-bounce" />
+                <CardTitle>CRITICAL EMERGENCY</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {/* Countdown */}
+              {autoCallCountdown !== null && (
+                <div className="text-center py-4 bg-red-100 dark:bg-red-900/50 rounded-lg border-2 border-red-500 animate-pulse">
+                  <p className="text-sm text-red-700 font-medium">AUTO-CALLING IN</p>
+                  <p className="text-6xl font-bold text-red-600">{autoCallCountdown}</p>
+                </div>
+              )}
+
+              <div className="text-center space-y-2">
+                <Badge className="bg-red-600 text-lg px-4 py-1">{emergencyDispatch.hazard_type}</Badge>
+                <p className="text-2xl font-bold">Severity: {emergencyDispatch.severity_score}/10</p>
+                <p className="text-sm text-muted-foreground">{emergencyDispatch.visual_evidence_summary}</p>
+              </div>
+
+              <a href={`tel:${getEmergencyNumber(emergencyDispatch.recommended_action)}`} className="block">
+                <Button className="w-full h-14 text-lg bg-red-600 hover:bg-red-700">
+                  <Phone className="h-5 w-5 mr-2" />
+                  CALL NOW: {getEmergencyNumber(emergencyDispatch.recommended_action)}
+                </Button>
+              </a>
+
+              {autoCallCountdown !== null && (
+                <Button variant="outline" className="w-full" onClick={cancelAutoCall}>
+                  Cancel Auto-Call
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <div>
         <h1 className="text-2xl font-semibold mb-2">Request Emergency Aid</h1>
         <p className="text-muted-foreground">
