@@ -4,10 +4,12 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { MapPin, Camera, Loader2, AlertTriangle, CheckCircle, Phone, MessageSquare, User } from 'lucide-react';
+import { Badge } from './ui/badge';
+import { MapPin, Camera, Loader2, AlertTriangle, CheckCircle, Phone, MessageSquare, User, X, Siren } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
+import { analyzeEmergencyDispatch, EmergencyDispatchResult } from '@/lib/gemini';
 
 interface PanicFormProps {
   userId: string;
@@ -28,6 +30,12 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
   // New form fields
   const [phoneNumber, setPhoneNumber] = useState('');
   const [helpMessage, setHelpMessage] = useState('');
+  
+  // Emergency Dispatcher AI State
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [dispatchResult, setDispatchResult] = useState<EmergencyDispatchResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -137,7 +145,7 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
     }
   };
 
-  const handleCapturePhoto = () => {
+  const handleCapturePhoto = async () => {
     if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
@@ -150,6 +158,12 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
       ctx.drawImage(video, 0, 0);
       const imageData = canvas.toDataURL('image/jpeg', 0.7);
       setPhoto(imageData);
+      setDispatchResult(null);
+      setAnalysisError(null);
+      
+      // Run AI analysis on captured photo
+      toast.success('Photo captured! Analyzing...');
+      await analyzePhotoWithAI(imageData);
     }
 
     // Stop camera
@@ -158,7 +172,6 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
       streamRef.current = null;
     }
     setIsTakingPhoto(false);
-    toast.success('Photo captured!');
   };
 
   const handleCancelCamera = () => {
@@ -169,18 +182,57 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
     setIsTakingPhoto(false);
   };
 
-  // Handle file selection (converts to Base64)
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle file selection (converts to Base64) and triggers AI analysis
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onloadend = () => {
+    reader.onloadend = async () => {
       const base64String = reader.result as string;
       setPhoto(base64String);
-      toast.success('Photo captured!');
+      setDispatchResult(null);
+      setAnalysisError(null);
+      toast.success('Photo captured! Analyzing...');
+      
+      // Run Emergency Dispatcher AI analysis
+      await analyzePhotoWithAI(base64String);
     };
     reader.readAsDataURL(file);
+  };
+
+  // Analyze photo with Emergency Dispatcher AI
+  const analyzePhotoWithAI = async (base64Image: string) => {
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+    
+    try {
+      console.log('[v0] Starting Emergency Dispatcher AI analysis...');
+      const result = await analyzeEmergencyDispatch(base64Image);
+      
+      // Log full AI response to console for debugging
+      console.log('[v0] Emergency Dispatcher AI Response:', JSON.stringify(result, null, 2));
+      
+      setDispatchResult(result);
+      
+      // Show popup modal if critical hazard detected
+      if (result.status_level === 'critical' && result.recommended_action !== 'none') {
+        console.log('[v0] CRITICAL HAZARD DETECTED - Showing emergency modal');
+        setShowEmergencyModal(true);
+        toast.error(`CRITICAL: ${result.hazard_type} detected! Severity ${result.severity_score}/10`);
+      } else if (result.status_level === 'monitoring') {
+        toast.warning(`${result.hazard_type} detected - Severity ${result.severity_score}/10`);
+      } else {
+        toast.success(`Analysis complete: ${result.hazard_type} - Severity ${result.severity_score}/10`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to analyze photo';
+      console.error('[v0] Emergency Dispatcher AI Error:', error);
+      setAnalysisError(errorMessage);
+      toast.error('AI analysis failed: ' + errorMessage);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   // Find nearest volunteer
@@ -329,8 +381,90 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
     );
   }
 
+  // Get emergency number based on recommended action
+  const getEmergencyNumber = (action: string): string => {
+    switch (action) {
+      case 'call_101': return '101';
+      case 'call_102': return '102';
+      case 'call_100': return '100';
+      default: return '112';
+    }
+  };
+
+  const getEmergencyLabel = (action: string): string => {
+    switch (action) {
+      case 'call_101': return 'Fire Department (101)';
+      case 'call_102': return 'Ambulance (102)';
+      case 'call_100': return 'Police (100)';
+      default: return 'Emergency (112)';
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50/50 to-yellow-50/30 dark:from-red-950 dark:via-orange-950 dark:to-yellow-950 flex items-center justify-center p-4">
+      {/* Emergency Call Modal */}
+      {showEmergencyModal && dispatchResult && dispatchResult.recommended_action !== 'none' && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm border-red-500 border-2 bg-white dark:bg-slate-900 animate-pulse">
+            <CardHeader className="bg-red-600 text-white rounded-t-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Siren className="h-6 w-6 animate-bounce" />
+                  <CardTitle>AI DETECTED CRITICAL HAZARD</CardTitle>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setShowEmergencyModal(false)}
+                  className="text-white hover:bg-red-700"
+                >
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              <div className="text-center space-y-2">
+                <Badge className="bg-red-600 text-lg px-4 py-1">
+                  {dispatchResult.hazard_type}
+                </Badge>
+                <p className="text-2xl font-bold">
+                  Severity: {dispatchResult.severity_score}/10
+                </p>
+                <p className="text-muted-foreground">
+                  {dispatchResult.visual_evidence_summary}
+                </p>
+              </div>
+              
+              <div className="bg-red-50 dark:bg-red-950/50 p-4 rounded-lg border border-red-200">
+                <p className="text-sm text-red-700 dark:text-red-300 mb-2 font-medium">
+                  Recommended: Call {dispatchResult.authority_assigned}
+                </p>
+              </div>
+
+              <a
+                href={`tel:${getEmergencyNumber(dispatchResult.recommended_action)}`}
+                className="block w-full"
+              >
+                <Button 
+                  className="w-full h-16 text-xl bg-red-600 hover:bg-red-700 animate-pulse"
+                >
+                  <Phone className="h-6 w-6 mr-3" />
+                  CALL {getEmergencyLabel(dispatchResult.recommended_action)}
+                </Button>
+              </a>
+
+              <Button 
+                variant="outline" 
+                className="w-full"
+                onClick={() => setShowEmergencyModal(false)}
+              >
+                I&apos;ll call manually later
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <Card className="w-full max-w-md border-red-200 dark:border-red-800">
         <CardHeader className="text-center pb-4">
           <div className="mx-auto w-16 h-16 bg-red-100 dark:bg-red-900 rounded-full flex items-center justify-center mb-4">
@@ -467,15 +601,79 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
                 </div>
               </div>
             ) : photo ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {/* Render Base64 photo as Data URI */}
                 <img 
                   src={photo} 
                   alt="Captured disaster photo" 
                   className="w-full rounded-lg max-h-48 object-cover"
                 />
+                
+                {/* AI Analysis Loading */}
+                {isAnalyzing && (
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/50 rounded-lg border border-blue-200 flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                    <span className="text-sm text-blue-700 dark:text-blue-400">
+                      Emergency Dispatcher AI analyzing...
+                    </span>
+                  </div>
+                )}
+
+                {/* AI Analysis Error */}
+                {analysisError && (
+                  <div className="p-3 bg-red-50 dark:bg-red-950/50 rounded-lg border border-red-300">
+                    <p className="text-sm text-red-700 dark:text-red-400 font-medium">
+                      AI Analysis Error:
+                    </p>
+                    <p className="text-sm text-red-600 dark:text-red-300">
+                      {analysisError}
+                    </p>
+                  </div>
+                )}
+
+                {/* AI Dispatch Result */}
+                {dispatchResult && !isAnalyzing && (
+                  <div className={`p-3 rounded-lg border-2 ${
+                    dispatchResult.status_level === 'critical' 
+                      ? 'bg-red-50 dark:bg-red-950/50 border-red-500' 
+                      : dispatchResult.status_level === 'monitoring'
+                        ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-400'
+                        : 'bg-green-50 dark:bg-green-950/50 border-green-400'
+                  }`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-semibold text-sm">AI Dispatcher</span>
+                      <Badge className={
+                        dispatchResult.status_level === 'critical' ? 'bg-red-600' : 
+                        dispatchResult.status_level === 'monitoring' ? 'bg-amber-500' : 'bg-green-600'
+                      }>
+                        {dispatchResult.status_level.toUpperCase()}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <p><strong>Hazard:</strong> {dispatchResult.hazard_type}</p>
+                      <p><strong>Severity:</strong> {dispatchResult.severity_score}/10</p>
+                      <p className="text-muted-foreground text-xs">{dispatchResult.visual_evidence_summary}</p>
+                    </div>
+                    
+                    {/* Call Button for Critical */}
+                    {dispatchResult.status_level === 'critical' && dispatchResult.recommended_action !== 'none' && (
+                      <Button 
+                        className="w-full mt-2 bg-red-600 hover:bg-red-700"
+                        onClick={() => setShowEmergencyModal(true)}
+                      >
+                        <Phone className="h-4 w-4 mr-2" />
+                        Call {dispatchResult.authority_assigned}
+                      </Button>
+                    )}
+                  </div>
+                )}
+
                 <Button 
-                  onClick={() => setPhoto(null)}
+                  onClick={() => {
+                    setPhoto(null);
+                    setDispatchResult(null);
+                    setAnalysisError(null);
+                  }}
                   variant="outline"
                   size="sm"
                   className="w-full"
