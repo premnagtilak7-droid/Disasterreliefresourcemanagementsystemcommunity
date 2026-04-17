@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 import { doc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -12,6 +12,26 @@ if (apiKey) {
 }
 
 const genAI = new GoogleGenerativeAI(apiKey);
+
+// CRITICAL: Safety settings that allow disaster/emergency content analysis
+const disasterAnalysisSafetySettings = [
+  {
+    category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE, // Allows disaster analysis
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+  {
+    category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+    threshold: HarmBlockThreshold.BLOCK_NONE,
+  },
+];
 
 // Export function to check API key status for UI
 export function isGeminiConfigured(): boolean {
@@ -439,13 +459,8 @@ export async function analyzeEmergencyDispatch(base64Image: string, contextMessa
         maxOutputTokens: 600,
         temperature: 0.3, // Slightly higher for better hazard detection
       },
-      // Safety settings relaxed for emergency analysis demo
-      safetySettings: [
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-      ],
+      // CRITICAL: Use proper HarmCategory enums for disaster analysis
+      safetySettings: disasterAnalysisSafetySettings,
     });
 
     // Build user context - this takes ABSOLUTE PRIORITY
@@ -652,12 +667,7 @@ export async function verifyVolunteerIdentity(base64Image: string): Promise<Volu
         maxOutputTokens: 500,
         temperature: 0.1, // Low temperature for accurate extraction
       },
-      safetySettings: [
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-      ],
+      safetySettings: disasterAnalysisSafetySettings,
     });
 
     const prompt = `ACT AS A SENIOR IDENTITY VERIFIER. Analyze this document image for a volunteer application.
