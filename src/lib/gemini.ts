@@ -389,6 +389,162 @@ export async function analyzeAndUpdateAlert(
   return analysis;
 }
 
+// ============ EMERGENCY DISPATCHER & RISK ASSESSMENT AI ============
+
+export interface EmergencyDispatchResult {
+  hazard_type: 'Fire' | 'Flood' | 'Medical' | 'Crime' | 'Collapse' | 'Gas Leak' | 'Electrical' | 'Other';
+  severity_score: number; // 1-10
+  recommended_action: 'call_101' | 'call_102' | 'call_100' | 'none';
+  status_level: 'critical' | 'stable' | 'monitoring';
+  visual_evidence_summary: string;
+  equipment_needed: string[];
+  secondary_risks?: string[];
+  authority_assigned?: string;
+}
+
+/**
+ * Senior Emergency Dispatcher & Risk Assessment AI
+ * Analyzes disaster images with high precision for autonomous routing to emergency services
+ * 
+ * Authority Codes:
+ * - 101: Fire Department
+ * - 102: Ambulance/Medical
+ * - 100: Police
+ * 
+ * @param base64Image - Base64 encoded image of the emergency scene
+ * @returns Emergency dispatch result with routing and equipment recommendations
+ */
+export async function analyzeEmergencyDispatch(base64Image: string): Promise<EmergencyDispatchResult> {
+  // Check if API key exists
+  if (!import.meta.env.VITE_GEMINI_API_KEY) {
+    return {
+      hazard_type: 'Other',
+      severity_score: 5,
+      recommended_action: 'none',
+      status_level: 'monitoring',
+      visual_evidence_summary: 'AI analysis unavailable - API key not configured',
+      equipment_needed: ['First aid kit', 'Flashlight', 'Protective gloves'],
+    };
+  }
+
+  try {
+    // Detect mime type and extract clean base64
+    const mimeType = detectMimeType(base64Image);
+    const cleanBase64 = extractBase64Data(base64Image);
+
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        maxOutputTokens: 600,
+        temperature: 0.1, // Low temperature for precise, consistent assessments
+      }
+    });
+
+    const prompt = `You are a Senior Emergency Dispatcher & Risk Assessment AI. Analyze this image with high precision.
+
+HAZARD IDENTIFICATION:
+1. Identify the PRIMARY emergency: Fire, Flood, Medical, Crime, Collapse, Gas Leak, Electrical, or Other
+2. Look for SECONDARY RISKS (e.g., live wires in a flood, gas leaks in a fire, structural collapse risk)
+
+CONTEXTUAL SEVERITY (1-10):
+- Rate 1-4 (STABLE): Minor incidents, controlled small fires, minor injuries, property damage only
+- Rate 5-6 (ELEVATED/MONITORING): Potential for escalation, needs monitoring, moderate injuries
+- Rate 7-10 (CRITICAL): Immediate life-threat, unconscious victims, spreading fire, rising floodwater, trapped persons
+
+AUTONOMOUS ROUTING - Assign the correct emergency authority:
+- "call_101" = Fire Department (fires, gas leaks, hazmat, rescue from heights/depths)
+- "call_102" = Ambulance/Medical (injuries, medical emergencies, unconscious persons)
+- "call_100" = Police (crimes, civil disturbance, traffic accidents, security threats)
+
+LOGIC GATE (MANDATORY):
+- If severity_score < 5: recommended_action MUST be "none"
+- If severity_score >= 5 and < 7: recommended_action based on hazard type
+- If severity_score >= 7: recommended_action MUST be the appropriate call command
+
+RESOURCE PRESCRIPTION:
+Generate a specific equipment checklist for the first responder based on what you see.
+
+Return ONLY a valid JSON object (no markdown, no explanation):
+{
+  "hazard_type": "Fire" | "Flood" | "Medical" | "Crime" | "Collapse" | "Gas Leak" | "Electrical" | "Other",
+  "severity_score": 1-10,
+  "recommended_action": "call_101" | "call_102" | "call_100" | "none",
+  "status_level": "critical" | "stable" | "monitoring",
+  "visual_evidence_summary": "1-sentence description of what you see in the image",
+  "equipment_needed": ["item1", "item2", "item3", "item4", "item5"],
+  "secondary_risks": ["risk1", "risk2"],
+  "authority_assigned": "Fire Department" | "Ambulance" | "Police" | "None"
+}`;
+
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          mimeType: mimeType,
+          data: cleanBase64,
+        },
+      },
+    ]);
+
+    const responseText = result.response.text();
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    
+    if (!jsonMatch) {
+      throw new Error("Invalid response format from Gemini Vision");
+    }
+
+    const dispatch = JSON.parse(jsonMatch[0]) as EmergencyDispatchResult;
+    
+    // Validate and enforce logic gate
+    if (dispatch.severity_score < 0) dispatch.severity_score = 1;
+    if (dispatch.severity_score > 10) dispatch.severity_score = 10;
+    
+    // Enforce logic gate rules
+    if (dispatch.severity_score < 5) {
+      dispatch.recommended_action = 'none';
+      dispatch.status_level = 'stable';
+    } else if (dispatch.severity_score >= 7) {
+      dispatch.status_level = 'critical';
+      // Ensure a call action is assigned for critical situations
+      if (dispatch.recommended_action === 'none') {
+        // Auto-assign based on hazard type
+        if (dispatch.hazard_type === 'Fire' || dispatch.hazard_type === 'Gas Leak') {
+          dispatch.recommended_action = 'call_101';
+        } else if (dispatch.hazard_type === 'Medical') {
+          dispatch.recommended_action = 'call_102';
+        } else if (dispatch.hazard_type === 'Crime') {
+          dispatch.recommended_action = 'call_100';
+        } else {
+          dispatch.recommended_action = 'call_102'; // Default to ambulance for critical unknowns
+        }
+      }
+    } else {
+      dispatch.status_level = 'monitoring';
+    }
+
+    // Set authority_assigned based on recommended_action
+    const authorityMap: Record<string, string> = {
+      'call_101': 'Fire Department',
+      'call_102': 'Ambulance',
+      'call_100': 'Police',
+      'none': 'None'
+    };
+    dispatch.authority_assigned = authorityMap[dispatch.recommended_action] || 'None';
+
+    return dispatch;
+  } catch (error) {
+    console.error("[v0] Emergency dispatch analysis error:", error);
+    return {
+      hazard_type: 'Other',
+      severity_score: 5,
+      recommended_action: 'none',
+      status_level: 'monitoring',
+      visual_evidence_summary: 'Unable to analyze image - manual assessment required',
+      equipment_needed: ['First aid kit', 'Flashlight', 'Protective gloves', 'Communication radio'],
+    };
+  }
+}
+
 // ============ MISSION AI TRIAGE ============
 
 export interface MissionTriageResult {

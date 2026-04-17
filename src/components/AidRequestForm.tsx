@@ -27,7 +27,7 @@ import {
 import { storage, db } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { analyzeBase64Photo, VisionAnalysis, isGeminiConfigured } from '@/lib/gemini';
+import { analyzeBase64Photo, VisionAnalysis, isGeminiConfigured, analyzeEmergencyDispatch, EmergencyDispatchResult } from '@/lib/gemini';
 import { toast } from 'sonner';
 
 interface AidRequestFormProps {
@@ -71,6 +71,7 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [instantAnalysis, setInstantAnalysis] = useState<VisionAnalysis | null>(null);
+  const [emergencyDispatch, setEmergencyDispatch] = useState<EmergencyDispatchResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   
@@ -116,6 +117,7 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
     if (file) {
       setPhotoFile(file);
       setInstantAnalysis(null);
+      setEmergencyDispatch(null);
       
       // Create preview
       const reader = new FileReader();
@@ -127,24 +129,31 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
       // Compress and analyze with Gemini IMMEDIATELY (before Firebase upload)
       try {
         setIsAnalyzing(true);
-        toast.loading('AI analyzing photo...');
+        toast.loading('AI Emergency Dispatcher analyzing photo...');
         
         const compressed = await compressImage(file);
         setCompressedBase64(compressed);
         
-        // Instant Gemini analysis with compressed image
-        const analysis = await analyzeBase64Photo(compressed);
-        setInstantAnalysis(analysis);
+        // Run both analyses in parallel for comprehensive assessment
+        const [basicAnalysis, dispatchAnalysis] = await Promise.all([
+          analyzeBase64Photo(compressed),
+          analyzeEmergencyDispatch(compressed)
+        ]);
+        
+        setInstantAnalysis(basicAnalysis);
+        setEmergencyDispatch(dispatchAnalysis);
         toast.dismiss();
         
-        if (analysis.description?.includes('API key not configured')) {
+        if (basicAnalysis.description?.includes('API key not configured')) {
           toast.warning('AI analysis unavailable - photo will still be uploaded');
-        } else if (analysis.isFalseAlarm) {
-          toast.error(`False Alarm Detected: ${analysis.falseAlarmReason || 'Not a disaster image'}`);
-        } else if (analysis.description === 'Unable to analyze photo') {
-          toast.warning('AI could not analyze photo - manual review needed');
+        } else if (basicAnalysis.isFalseAlarm) {
+          toast.error(`False Alarm Detected: ${basicAnalysis.falseAlarmReason || 'Not a disaster image'}`);
+        } else if (dispatchAnalysis.status_level === 'critical') {
+          toast.error(`CRITICAL: ${dispatchAnalysis.hazard_type} - Call ${dispatchAnalysis.authority_assigned}!`, {
+            duration: 10000,
+          });
         } else {
-          toast.success(`AI Analysis: Severity ${analysis.severity}/10 - ${analysis.primaryNeed}`);
+          toast.success(`AI Analysis: ${dispatchAnalysis.hazard_type} - Severity ${dispatchAnalysis.severity_score}/10`);
         }
       } catch (error) {
         console.error('Analysis error:', error);
@@ -160,6 +169,7 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
     setPhotoPreview(null);
     setCompressedBase64(null);
     setInstantAnalysis(null);
+    setEmergencyDispatch(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
@@ -241,6 +251,16 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
           primaryNeed: instantAnalysis.primaryNeed,
           description: instantAnalysis.description,
           isFalseAlarm: instantAnalysis.isFalseAlarm,
+        } : null,
+        // Emergency Dispatcher Analysis
+        emergencyDispatch: emergencyDispatch ? {
+          hazard_type: emergencyDispatch.hazard_type,
+          severity_score: emergencyDispatch.severity_score,
+          recommended_action: emergencyDispatch.recommended_action,
+          status_level: emergencyDispatch.status_level,
+          visual_evidence_summary: emergencyDispatch.visual_evidence_summary,
+          equipment_needed: emergencyDispatch.equipment_needed,
+          authority_assigned: emergencyDispatch.authority_assigned,
         } : null,
       };
       
@@ -524,8 +544,97 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                   )}
                 </div>
                 
-                {/* AI Analysis Results */}
-                {instantAnalysis && (
+                {/* AI Emergency Dispatcher Results */}
+                {emergencyDispatch && (
+                  <div className={`p-4 rounded-lg border-2 ${
+                    emergencyDispatch.status_level === 'critical' 
+                      ? 'bg-red-50 dark:bg-red-950/50 border-red-500' 
+                      : emergencyDispatch.status_level === 'monitoring'
+                        ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-400'
+                        : 'bg-green-50 dark:bg-green-950/50 border-green-400'
+                  }`}>
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={`h-5 w-5 ${
+                          emergencyDispatch.status_level === 'critical' ? 'text-red-600' : 
+                          emergencyDispatch.status_level === 'monitoring' ? 'text-amber-600' : 'text-green-600'
+                        }`} />
+                        <span className="font-semibold">Emergency Dispatcher AI</span>
+                      </div>
+                      <Badge className={
+                        emergencyDispatch.status_level === 'critical' ? 'bg-red-600' : 
+                        emergencyDispatch.status_level === 'monitoring' ? 'bg-amber-500' : 'bg-green-600'
+                      }>
+                        {emergencyDispatch.status_level.toUpperCase()}
+                      </Badge>
+                    </div>
+
+                    {/* Hazard & Severity */}
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div className="bg-white dark:bg-slate-900 p-2 rounded border">
+                        <p className="text-xs text-muted-foreground">Hazard Type</p>
+                        <p className="font-semibold">{emergencyDispatch.hazard_type}</p>
+                      </div>
+                      <div className="bg-white dark:bg-slate-900 p-2 rounded border">
+                        <p className="text-xs text-muted-foreground">Severity Score</p>
+                        <p className="font-semibold">{emergencyDispatch.severity_score}/10</p>
+                      </div>
+                    </div>
+
+                    {/* Visual Evidence */}
+                    <div className="mb-3">
+                      <p className="text-xs text-muted-foreground mb-1">Visual Evidence</p>
+                      <p className="text-sm">{emergencyDispatch.visual_evidence_summary}</p>
+                    </div>
+
+                    {/* Recommended Action */}
+                    {emergencyDispatch.recommended_action !== 'none' && (
+                      <div className={`p-3 rounded-lg mb-3 ${
+                        emergencyDispatch.status_level === 'critical' 
+                          ? 'bg-red-100 dark:bg-red-900/50' 
+                          : 'bg-amber-100 dark:bg-amber-900/50'
+                      }`}>
+                        <p className="text-xs font-medium mb-1">RECOMMENDED ACTION</p>
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-5 w-5" />
+                          <span className="font-bold text-lg">
+                            Call {emergencyDispatch.recommended_action.replace('call_', '')} - {emergencyDispatch.authority_assigned}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Equipment Needed */}
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-2">Equipment Checklist for First Responder</p>
+                      <div className="flex flex-wrap gap-1">
+                        {emergencyDispatch.equipment_needed.map((item, idx) => (
+                          <Badge key={idx} variant="outline" className="text-xs">
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Secondary Risks */}
+                    {emergencyDispatch.secondary_risks && emergencyDispatch.secondary_risks.length > 0 && (
+                      <div className="mt-3 pt-3 border-t">
+                        <p className="text-xs text-muted-foreground mb-1">Secondary Risks Detected</p>
+                        <div className="flex flex-wrap gap-1">
+                          {emergencyDispatch.secondary_risks.map((risk, idx) => (
+                            <Badge key={idx} variant="destructive" className="text-xs">
+                              {risk}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Basic Analysis Fallback (if dispatch failed but basic worked) */}
+                {instantAnalysis && !emergencyDispatch && (
                   <div className={`p-3 rounded-lg ${
                     instantAnalysis.isFalseAlarm 
                       ? 'bg-red-100 dark:bg-red-950 border border-red-300' 
