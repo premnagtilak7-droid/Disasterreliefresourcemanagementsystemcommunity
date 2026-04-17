@@ -600,6 +600,155 @@ Return ONLY a valid JSON object (no markdown, no code blocks, no explanation):
   }
 }
 
+// ============ VOLUNTEER IDENTITY VERIFICATION AI ============
+
+export interface VolunteerVerificationResult {
+  isVerified: boolean;
+  name: string;
+  documentType: 'Aadhar Card' | 'PAN Card' | 'Driving License' | 'Voter ID' | 'NGO Certificate' | 'NDRF Certificate' | 'Civil Defense ID' | 'Other' | 'Invalid';
+  expiryStatus: 'valid' | 'expired' | 'not_applicable';
+  isVolunteerAuthorized: boolean;
+  confidence_score: number; // 0-100
+  extractedDetails?: {
+    documentNumber?: string;
+    issueDate?: string;
+    expiryDate?: string;
+    issuingAuthority?: string;
+  };
+  rejectionReason?: string;
+}
+
+/**
+ * Senior Identity Verifier AI for Volunteer Applications
+ * Validates Indian Government IDs and volunteer certificates
+ * 
+ * Accepted Documents:
+ * - Aadhar Card (Front or Back)
+ * - PAN Card
+ * - Driving License
+ * - Voter ID
+ * - NGO/Civil Defense/NDRF Volunteer Certificates
+ */
+export async function verifyVolunteerIdentity(base64Image: string): Promise<VolunteerVerificationResult> {
+  if (!import.meta.env.VITE_GEMINI_API_KEY) {
+    return {
+      isVerified: false,
+      name: '',
+      documentType: 'Invalid',
+      expiryStatus: 'not_applicable',
+      isVolunteerAuthorized: false,
+      confidence_score: 0,
+      rejectionReason: 'AI verification unavailable - API key not configured',
+    };
+  }
+
+  try {
+    const mimeType = detectMimeType(base64Image);
+    const cleanBase64 = extractBase64Data(base64Image);
+
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        maxOutputTokens: 500,
+        temperature: 0.1, // Low temperature for accurate extraction
+      },
+      safetySettings: [
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+      ],
+    });
+
+    const prompt = `ACT AS A SENIOR IDENTITY VERIFIER. Analyze this document image for a volunteer application.
+
+IDENTIFICATION SCOPE - Accept any valid Indian Government ID:
+- Aadhar Card (Front or Back) - 12-digit UID number
+- PAN Card - 10-character alphanumeric (e.g., ABCDE1234F)
+- Driving License - State code + number
+- Voter ID - EPIC number
+- NGO/Civil Defense/NDRF Volunteer Certificates
+
+VALIDATION LOGIC:
+1. Extract the NAME clearly from the document
+2. Check for EXPIRY DATE. If no expiry is visible, assume it is "valid"
+3. Look for official seals, holograms, Government of India header, or state government insignia
+4. For volunteer certificates, look for organization name and authorization stamps
+
+SAFETY BYPASS FOR HACKATHON:
+Even if the image is slightly blurry, taken from a phone screen, or at an angle, you MUST attempt to:
+- Extract the name
+- Identify the document type
+- Set isVerified to TRUE if it looks like a legitimate government document or volunteer certificate
+
+CONFIDENCE SCORING:
+- 90-100: Clear image, all details visible, official markings present
+- 70-89: Readable but some details unclear
+- 50-69: Partially readable, document type identifiable
+- Below 50: Cannot verify - reject
+
+Return ONLY a valid JSON object (no markdown):
+{
+  "isVerified": true/false,
+  "name": "Full name as shown on document",
+  "documentType": "Aadhar Card" | "PAN Card" | "Driving License" | "Voter ID" | "NGO Certificate" | "NDRF Certificate" | "Civil Defense ID" | "Other" | "Invalid",
+  "expiryStatus": "valid" | "expired" | "not_applicable",
+  "isVolunteerAuthorized": true,
+  "confidence_score": 0-100,
+  "extractedDetails": {
+    "documentNumber": "if visible",
+    "issueDate": "if visible",
+    "expiryDate": "if visible",
+    "issuingAuthority": "Government of India / State name / Organization"
+  },
+  "rejectionReason": "Only if isVerified is false - explain why"
+}`;
+
+    const result = await model.generateContent([
+      prompt,
+      {
+        inlineData: {
+          mimeType: mimeType,
+          data: cleanBase64,
+        },
+      },
+    ]);
+
+    const responseText = result.response.text();
+    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+    
+    if (!jsonMatch) {
+      throw new Error("Invalid response format from Gemini Vision");
+    }
+
+    const verification = JSON.parse(jsonMatch[0]) as VolunteerVerificationResult;
+    
+    // Enforce confidence threshold
+    if (verification.confidence_score < 50) {
+      verification.isVerified = false;
+      verification.rejectionReason = verification.rejectionReason || 'Confidence score too low - please upload a clearer image';
+    }
+    
+    // Auto-authorize volunteers with valid government IDs
+    if (verification.isVerified && verification.expiryStatus !== 'expired') {
+      verification.isVolunteerAuthorized = true;
+    }
+
+    return verification;
+  } catch (error) {
+    console.error("[v0] Volunteer identity verification error:", error);
+    return {
+      isVerified: false,
+      name: '',
+      documentType: 'Invalid',
+      expiryStatus: 'not_applicable',
+      isVolunteerAuthorized: false,
+      confidence_score: 0,
+      rejectionReason: 'AI verification failed - please try again or contact support',
+    };
+  }
+}
+
 // ============ MISSION AI TRIAGE ============
 
 export interface MissionTriageResult {
