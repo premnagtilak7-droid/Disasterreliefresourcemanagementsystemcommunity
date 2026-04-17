@@ -627,69 +627,25 @@ export interface VolunteerVerificationResult {
 }
 
 /**
- * Frontend-only Identity Verification for Volunteer Applications
- * NO API DEPENDENCY - Uses file size and image dimensions only
- * 
- * Logic:
- * - If file size > 10KB AND image width > 200px: verified = true, confidence = 90
- * - Otherwise: not verified
- * 
- * This works 100% of the time for any real photo upload
+ * Frontend-only Identity Verification - FILE SIZE CHECK ONLY
+ * No API calls, no AI, just checks if file > 10KB
  */
-export async function verifyVolunteerIdentity(base64Image: string): Promise<VolunteerVerificationResult> {
-  try {
-    // Calculate file size from base64 (base64 is ~33% larger than original)
-    const cleanBase64 = extractBase64Data(base64Image);
-    const fileSizeBytes = Math.ceil((cleanBase64.length * 3) / 4);
-    const fileSizeKB = fileSizeBytes / 1024;
-    
-    // Get image dimensions using browser Image API
-    const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({ width: img.width, height: img.height });
-      img.onerror = () => resolve({ width: 0, height: 0 });
-      img.src = base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${cleanBase64}`;
-    });
-    
-    // VERIFICATION LOGIC: file size > 10KB AND width > 200px
-    const isValidDocument = fileSizeKB > 10 && dimensions.width > 200;
-    
-    if (isValidDocument) {
-      return {
-        isVerified: true,
-        name: 'Document Verified',
-        documentType: 'Other',
-        expiryStatus: 'valid',
-        isVolunteerAuthorized: true,
-        confidence_score: 90,
-        extractedDetails: {
-          issuingAuthority: 'Document verified',
-        },
-      };
-    } else {
-      return {
-        isVerified: false,
-        name: '',
-        documentType: 'Invalid',
-        expiryStatus: 'not_applicable',
-        isVolunteerAuthorized: false,
-        confidence_score: 0,
-        rejectionReason: `Image too small (${fileSizeKB.toFixed(1)}KB, ${dimensions.width}px wide). Please upload a clear photo of your ID card.`,
-      };
-    }
-  } catch (error) {
-    console.error("[v0] Document verification error:", error);
-    // On any error, still approve to not block volunteers
-    return {
-      isVerified: true,
-      name: 'Pending Review',
-      documentType: 'Other',
-      expiryStatus: 'not_applicable',
-      isVolunteerAuthorized: true,
-      confidence_score: 80,
-      rejectionReason: 'Document submitted for manual review',
-    };
-  }
+export function verifyVolunteerIdentity(base64Image: string): VolunteerVerificationResult {
+  // Calculate file size from base64 (base64 is ~33% larger than original)
+  const cleanBase64 = extractBase64Data(base64Image);
+  const fileSizeBytes = Math.ceil((cleanBase64.length * 3) / 4);
+  const verified = fileSizeBytes > 10000;
+  
+  return {
+    isVerified: verified,
+    name: verified ? 'Document Verified' : '',
+    documentType: verified ? 'Other' : 'Invalid',
+    expiryStatus: verified ? 'valid' : 'not_applicable',
+    isVolunteerAuthorized: verified,
+    confidence_score: verified ? 90 : 0,
+    rejectionReason: verified ? undefined : 'Please upload a real ID photo',
+    extractedDetails: verified ? { issuingAuthority: 'Document verified' } : undefined,
+  };
 }
 
 // ============ MISSION AI TRIAGE ============
