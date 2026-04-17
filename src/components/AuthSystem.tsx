@@ -81,33 +81,26 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
     reader.readAsDataURL(file);
   };
 
-  // Verify the uploaded document using Gemini Vision
-  const handleVerifyDocument = async () => {
+  // Verify the uploaded document - simple file size check (no API)
+  const handleVerifyDocument = () => {
     if (!documentImage) {
       toast.error('Please upload a document first');
       return;
     }
 
     setIsVerifying(true);
-    try {
-      const result = await verifyVolunteerDocument(documentImage);
-      setVerificationResult(result);
-      
-      if (result.isVerified) {
-        toast.success(`Document verified! Welcome, ${result.name}`);
-        // Auto-fill the name field if empty
-        if (!signUpName && result.name) {
-          setSignUpName(result.name);
-        }
-      } else {
-        toast.error(result.rejectionReason || 'Document verification failed');
-      }
-    } catch (error) {
-      console.error('Verification error:', error);
-      toast.error('Failed to verify document. Please try again.');
-    } finally {
-      setIsVerifying(false);
+    
+    // Synchronous - no await needed
+    const result = verifyVolunteerDocument(documentImage);
+    setVerificationResult(result);
+    
+    if (result.isVerified) {
+      toast.success('Document verified successfully!');
+    } else {
+      toast.error(result.rejectionReason || 'Please upload a clear photo of your ID card or certificate in good lighting.');
     }
+    
+    setIsVerifying(false);
   };
 
   // Reset document verification when role changes

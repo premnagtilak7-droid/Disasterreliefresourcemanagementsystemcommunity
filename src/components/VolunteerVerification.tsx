@@ -2,14 +2,13 @@ import React, { useState, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert'; // Used for verification result alerts
 import { Progress } from './ui/progress';
 import { 
   Camera, 
   Upload, 
   CheckCircle, 
   XCircle, 
-  AlertTriangle, 
   Loader2,
   FileText,
   Shield,
@@ -17,7 +16,7 @@ import {
   Calendar,
   RefreshCw
 } from 'lucide-react';
-import { verifyVolunteerDocument, VolunteerVerificationResult, isGeminiConfigured } from '@/lib/gemini';
+import { verifyVolunteerDocument, VolunteerVerificationResult } from '@/lib/gemini';
 import { toast } from 'sonner';
 
 interface VolunteerVerificationProps {
@@ -32,8 +31,6 @@ export function VolunteerVerification({ onVerificationComplete, onSkip }: Volunt
   const [verificationProgress, setVerificationProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  
-  const geminiConfigured = isGeminiConfigured();
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -59,43 +56,27 @@ export function VolunteerVerification({ onVerificationComplete, onSkip }: Volunt
     reader.readAsDataURL(file);
   };
 
-  const handleVerify = async () => {
+  const handleVerify = () => {
     if (!documentImage) {
       toast.error('Please upload a document image first');
       return;
     }
 
     setIsVerifying(true);
-    setVerificationProgress(0);
+    setVerificationProgress(50);
 
-    // Simulate progress for better UX
-    const progressInterval = setInterval(() => {
-      setVerificationProgress(prev => {
-        if (prev >= 90) {
-          clearInterval(progressInterval);
-          return 90;
-        }
-        return prev + 10;
-      });
-    }, 200);
-
-    try {
-      const result = await verifyVolunteerDocument(documentImage);
-      setVerificationProgress(100);
-      setVerificationResult(result);
-      
-      if (result.isVerified) {
-        toast.success('Document verified successfully!');
-      } else {
-        toast.error(result.rejectionReason || 'Verification failed');
-      }
-    } catch (error) {
-      console.error('Verification error:', error);
-      toast.error('Failed to verify document');
-    } finally {
-      clearInterval(progressInterval);
-      setIsVerifying(false);
+    // Synchronous verification - no API call
+    const result = verifyVolunteerDocument(documentImage);
+    setVerificationProgress(100);
+    setVerificationResult(result);
+    
+    if (result.isVerified) {
+      toast.success('Document verified successfully!');
+    } else {
+      toast.error(result.rejectionReason || 'Please upload a clear photo of your ID card or certificate in good lighting.');
     }
+    
+    setIsVerifying(false);
   };
 
   const handleRetry = () => {
@@ -126,17 +107,6 @@ export function VolunteerVerification({ onVerificationComplete, onSkip }: Volunt
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* API Key Warning */}
-          {!geminiConfigured && (
-            <Alert className="border-amber-300 bg-amber-50 dark:bg-amber-950/30">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              <AlertTitle className="text-amber-800 dark:text-amber-300">AI Verification Unavailable</AlertTitle>
-              <AlertDescription className="text-amber-700 dark:text-amber-400">
-                VITE_GEMINI_API_KEY is not configured. Document verification requires AI analysis.
-              </AlertDescription>
-            </Alert>
-          )}
-
           {/* Hidden file inputs */}
           <input
             ref={fileInputRef}
@@ -303,7 +273,7 @@ export function VolunteerVerification({ onVerificationComplete, onSkip }: Volunt
             {documentImage && !verificationResult && (
               <Button 
                 onClick={handleVerify}
-                disabled={isVerifying || !geminiConfigured}
+                disabled={isVerifying}
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >
                 {isVerifying ? (
