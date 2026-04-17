@@ -1,14 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Badge } from './ui/badge';
 import { ThemeToggle } from './ThemeToggle';
-import { UserCheck, Shield, Users, Eye, EyeOff, AlertTriangle, Loader2 } from 'lucide-react';
+import { UserCheck, Shield, Users, Eye, EyeOff, AlertTriangle, Loader2, Upload, Camera, CheckCircle, XCircle, FileText } from 'lucide-react';
 import { roleDescriptions } from './constants/uiConstants';
 import { registerUser, loginUser, signInWithGoogle, resetPassword, signInAnonymouslyForEmergency } from '@/lib/users';
+import { verifyVolunteerDocument, VolunteerVerificationResult } from '@/lib/gemini';
 import { toast } from 'sonner';
 import { PanicForm } from './PanicForm';
 
@@ -51,6 +53,71 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
   const [signUpPassword, setSignUpPassword] = useState('');
   const [signUpConfirmPassword, setSignUpConfirmPassword] = useState('');
   const [signUpRole, setSignUpRole] = useState<UserRole>('victim');
+  
+  // Volunteer Document Verification State
+  const [documentImage, setDocumentImage] = useState<string | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationResult, setVerificationResult] = useState<VolunteerVerificationResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Handle document file selection for volunteer verification
+  const handleDocumentSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please upload an image file (JPG, PNG, etc.)');
+      return;
+    }
+
+    // Convert to Base64
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64String = reader.result as string;
+      setDocumentImage(base64String);
+      setVerificationResult(null); // Reset any previous verification
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Verify the uploaded document using Gemini Vision
+  const handleVerifyDocument = async () => {
+    if (!documentImage) {
+      toast.error('Please upload a document first');
+      return;
+    }
+
+    setIsVerifying(true);
+    try {
+      const result = await verifyVolunteerDocument(documentImage);
+      setVerificationResult(result);
+      
+      if (result.isVerified) {
+        toast.success(`Document verified! Welcome, ${result.name}`);
+        // Auto-fill the name field if empty
+        if (!signUpName && result.name) {
+          setSignUpName(result.name);
+        }
+      } else {
+        toast.error(result.rejectionReason || 'Document verification failed');
+      }
+    } catch (error) {
+      console.error('Verification error:', error);
+      toast.error('Failed to verify document. Please try again.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  // Reset document verification when role changes
+  const handleRoleChange = (value: UserRole) => {
+    setSignUpRole(value);
+    if (value !== 'volunteer') {
+      setDocumentImage(null);
+      setVerificationResult(null);
+    }
+  };
 
   const handleEmergencySOS = async () => {
     setIsStartingPanic(true);
@@ -409,7 +476,7 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
                 
                 <div className="space-y-2">
                   <Label htmlFor="signup-role">Role</Label>
-                  <Select value={signUpRole} onValueChange={(value: UserRole) => setSignUpRole(value)}>
+                  <Select value={signUpRole} onValueChange={handleRoleChange}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select your role" />
                     </SelectTrigger>
@@ -439,14 +506,158 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
                     </p>
                   </div>
                 </div>
+
+                {/* Volunteer Document Verification Section */}
+                {signUpRole === 'volunteer' && (
+                  <div className="space-y-3 p-4 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50/50 dark:bg-amber-950/20">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-amber-600" />
+                      <Label className="text-amber-800 dark:text-amber-300 font-medium">
+                        Identity Verification (Required)
+                      </Label>
+                    </div>
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      Upload a Government ID or NGO/First Responder Certificate for verification
+                    </p>
+
+                    {/* Hidden file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleDocumentSelect}
+                      className="hidden"
+                    />
+
+                    {/* Document preview or upload button */}
+                    {documentImage ? (
+                      <div className="space-y-3">
+                        <div className="relative">
+                          <img 
+                            src={documentImage} 
+                            alt="Document preview" 
+                            className="w-full h-32 object-cover rounded-lg border"
+                          />
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="absolute top-2 right-2"
+                            onClick={() => {
+                              setDocumentImage(null);
+                              setVerificationResult(null);
+                            }}
+                          >
+                            Change
+                          </Button>
+                        </div>
+
+                        {/* Verification status */}
+                        {verificationResult ? (
+                          <div className={`p-3 rounded-lg border ${
+                            verificationResult.isVerified 
+                              ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800' 
+                              : 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+                          }`}>
+                            <div className="flex items-center gap-2 mb-2">
+                              {verificationResult.isVerified ? (
+                                <CheckCircle className="h-5 w-5 text-green-600" />
+                              ) : (
+                                <XCircle className="h-5 w-5 text-red-600" />
+                              )}
+                              <span className={`font-medium ${
+                                verificationResult.isVerified ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'
+                              }`}>
+                                {verificationResult.isVerified ? 'Verified' : 'Not Verified'}
+                              </span>
+                              <Badge variant="outline" className="ml-auto text-xs">
+                                {Math.round(verificationResult.confidence_score * 100)}% confidence
+                              </Badge>
+                            </div>
+                            {verificationResult.isVerified ? (
+                              <div className="space-y-1 text-sm">
+                                <p className="text-green-700 dark:text-green-400">
+                                  <strong>Name:</strong> {verificationResult.name}
+                                </p>
+                                <p className="text-green-700 dark:text-green-400">
+                                  <strong>Document:</strong> {verificationResult.documentType}
+                                </p>
+                                <p className="text-green-700 dark:text-green-400">
+                                  <strong>Status:</strong> {verificationResult.expiryStatus === 'valid' ? 'Valid' : 'Expired'}
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-red-600 dark:text-red-400">
+                                {verificationResult.rejectionReason}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <Button
+                            type="button"
+                            onClick={handleVerifyDocument}
+                            disabled={isVerifying}
+                            className="w-full bg-amber-600 hover:bg-amber-700"
+                          >
+                            {isVerifying ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Verifying Document...
+                              </>
+                            ) : (
+                              <>
+                                <Shield className="h-4 w-4 mr-2" />
+                                Verify Document
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => fileInputRef.current?.click()}
+                        >
+                          <Upload className="h-4 w-4 mr-2" />
+                          Upload ID
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => {
+                            // Use file input with capture for camera
+                            if (fileInputRef.current) {
+                              fileInputRef.current.setAttribute('capture', 'environment');
+                              fileInputRef.current.click();
+                              fileInputRef.current.removeAttribute('capture');
+                            }
+                          }}
+                        >
+                          <Camera className="h-4 w-4 mr-2" />
+                          Take Photo
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 
                 <Button 
                   type="submit" 
                   className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 dark:from-green-500 dark:to-green-600 dark:hover:from-green-600 dark:hover:to-green-700" 
-                  disabled={isLoading}
+                  disabled={isLoading || (signUpRole === 'volunteer' && !verificationResult?.isVerified)}
                 >
                   {isLoading ? 'Creating account...' : 'Create Account'}
                 </Button>
+                
+                {signUpRole === 'volunteer' && !verificationResult?.isVerified && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
+                    Document verification required to create volunteer account
+                  </p>
+                )}
 
                 <div className="relative my-4">
                   <div className="absolute inset-0 flex items-center">
