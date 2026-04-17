@@ -215,13 +215,17 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
       
       setDispatchResult(result);
       
-      // Show popup modal if critical hazard detected
-      if (result.status_level === 'critical' && result.recommended_action !== 'none') {
-        console.log('[v0] CRITICAL HAZARD DETECTED - Showing emergency modal');
+      // Show popup modal ONLY if severity > 7 (triggers emergency dialer)
+      if (result.severity_score > 7 && result.recommended_action !== 'none') {
+        console.log('[v0] CRITICAL HAZARD (Severity > 7) - Showing emergency call modal');
         setShowEmergencyModal(true);
-        toast.error(`CRITICAL: ${result.hazard_type} detected! Severity ${result.severity_score}/10`);
+        toast.error(`CRITICAL: ${result.hazard_type} detected! Severity ${result.severity_score}/10 - Call ${result.authority_assigned}!`, {
+          duration: 10000,
+        });
+      } else if (result.hazard_type === 'No Hazard Detected') {
+        toast.success('No hazard detected in this image');
       } else if (result.status_level === 'monitoring') {
-        toast.warning(`${result.hazard_type} detected - Severity ${result.severity_score}/10`);
+        toast.warning(`${result.hazard_type} detected - Severity ${result.severity_score}/10 (monitoring)`);
       } else {
         toast.success(`Analysis complete: ${result.hazard_type} - Severity ${result.severity_score}/10`);
       }
@@ -402,8 +406,8 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50/50 to-yellow-50/30 dark:from-red-950 dark:via-orange-950 dark:to-yellow-950 flex items-center justify-center p-4">
-      {/* Emergency Call Modal */}
-      {showEmergencyModal && dispatchResult && dispatchResult.recommended_action !== 'none' && (
+      {/* Emergency Call Modal - Only shows when severity > 7 */}
+      {showEmergencyModal && dispatchResult && dispatchResult.severity_score > 7 && dispatchResult.recommended_action !== 'none' && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-sm border-red-500 border-2 bg-white dark:bg-slate-900 animate-pulse">
             <CardHeader className="bg-red-600 text-white rounded-t-lg">
@@ -655,15 +659,17 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
                       <p className="text-muted-foreground text-xs">{dispatchResult.visual_evidence_summary}</p>
                     </div>
                     
-                    {/* Call Button for Critical */}
-                    {dispatchResult.status_level === 'critical' && dispatchResult.recommended_action !== 'none' && (
-                      <Button 
-                        className="w-full mt-2 bg-red-600 hover:bg-red-700"
-                        onClick={() => setShowEmergencyModal(true)}
-                      >
-                        <Phone className="h-4 w-4 mr-2" />
-                        Call {dispatchResult.authority_assigned}
-                      </Button>
+                    {/* Call Now Button - ONLY appears when severity > 7 */}
+                    {dispatchResult.severity_score > 7 && dispatchResult.recommended_action !== 'none' && (
+                      <a href={`tel:${getEmergencyNumber(dispatchResult.recommended_action)}`} className="block w-full mt-2">
+                        <Button 
+                          className="w-full bg-red-600 hover:bg-red-700"
+                          type="button"
+                        >
+                          <Phone className="h-4 w-4 mr-2" />
+                          Call Now: {getEmergencyLabel(dispatchResult.recommended_action)}
+                        </Button>
+                      </a>
                     )}
                   </div>
                 )}

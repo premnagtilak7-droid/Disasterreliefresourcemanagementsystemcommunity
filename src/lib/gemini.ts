@@ -392,7 +392,7 @@ export async function analyzeAndUpdateAlert(
 // ============ EMERGENCY DISPATCHER & RISK ASSESSMENT AI ============
 
 export interface EmergencyDispatchResult {
-  hazard_type: 'Fire' | 'Flood' | 'Medical' | 'Crime' | 'Collapse' | 'Gas Leak' | 'Electrical' | 'Other';
+  hazard_type: 'Fire' | 'Flood' | 'Medical' | 'Crime' | 'Collapse' | 'Gas Leak' | 'Electrical' | 'No Hazard Detected' | 'Other';
   severity_score: number; // 1-10
   recommended_action: 'call_101' | 'call_102' | 'call_100' | 'none';
   status_level: 'critical' | 'stable' | 'monitoring';
@@ -443,11 +443,13 @@ export async function analyzeEmergencyDispatch(base64Image: string): Promise<Eme
     const prompt = `You are a Senior Emergency Dispatcher & Risk Assessment AI. Analyze this image with high precision.
 
 HAZARD IDENTIFICATION:
-1. Identify the PRIMARY emergency: Fire, Flood, Medical, Crime, Collapse, Gas Leak, Electrical, or Other
-2. Look for SECONDARY RISKS (e.g., live wires in a flood, gas leaks in a fire, structural collapse risk)
+1. Identify the PRIMARY emergency: Fire, Flood, Medical, Crime, Collapse, Gas Leak, Electrical
+2. If NO EMERGENCY or HAZARD is visible (e.g., normal scene, safe environment, no danger), set hazard_type to "No Hazard Detected"
+3. Look for SECONDARY RISKS (e.g., live wires in a flood, gas leaks in a fire, structural collapse risk)
 
 CONTEXTUAL SEVERITY (1-10):
-- Rate 1-4 (STABLE): Minor incidents, controlled small fires, minor injuries, property damage only
+- Rate 0-2 (NO HAZARD): No emergency visible, safe scene, false alarm
+- Rate 3-4 (STABLE): Minor incidents, controlled small fires, minor injuries, property damage only
 - Rate 5-6 (ELEVATED/MONITORING): Potential for escalation, needs monitoring, moderate injuries
 - Rate 7-10 (CRITICAL): Immediate life-threat, unconscious victims, spreading fire, rising floodwater, trapped persons
 
@@ -455,23 +457,24 @@ AUTONOMOUS ROUTING - Assign the correct emergency authority:
 - "call_101" = Fire Department (fires, gas leaks, hazmat, rescue from heights/depths)
 - "call_102" = Ambulance/Medical (injuries, medical emergencies, unconscious persons)
 - "call_100" = Police (crimes, civil disturbance, traffic accidents, security threats)
+- "none" = No emergency services needed
 
 LOGIC GATE (MANDATORY):
-- If severity_score < 5: recommended_action MUST be "none"
+- If NO hazard detected OR severity_score <= 4: recommended_action MUST be "none", hazard_type should be "No Hazard Detected" if nothing dangerous
 - If severity_score >= 5 and < 7: recommended_action based on hazard type
-- If severity_score >= 7: recommended_action MUST be the appropriate call command
+- If severity_score > 7: recommended_action MUST be the appropriate call command (this triggers emergency dialer)
 
 RESOURCE PRESCRIPTION:
-Generate a specific equipment checklist for the first responder based on what you see.
+Generate a specific equipment checklist for the first responder based on what you see. If no hazard, return empty array.
 
 Return ONLY a valid JSON object (no markdown, no explanation):
 {
-  "hazard_type": "Fire" | "Flood" | "Medical" | "Crime" | "Collapse" | "Gas Leak" | "Electrical" | "Other",
-  "severity_score": 1-10,
+  "hazard_type": "Fire" | "Flood" | "Medical" | "Crime" | "Collapse" | "Gas Leak" | "Electrical" | "No Hazard Detected",
+  "severity_score": 0-10,
   "recommended_action": "call_101" | "call_102" | "call_100" | "none",
   "status_level": "critical" | "stable" | "monitoring",
   "visual_evidence_summary": "1-sentence description of what you see in the image",
-  "equipment_needed": ["item1", "item2", "item3", "item4", "item5"],
+  "equipment_needed": ["item1", "item2", "item3"],
   "secondary_risks": ["risk1", "risk2"],
   "authority_assigned": "Fire Department" | "Ambulance" | "Police" | "None"
 }`;
@@ -496,14 +499,24 @@ Return ONLY a valid JSON object (no markdown, no explanation):
     const dispatch = JSON.parse(jsonMatch[0]) as EmergencyDispatchResult;
     
     // Validate and enforce logic gate
-    if (dispatch.severity_score < 0) dispatch.severity_score = 1;
+    if (dispatch.severity_score < 0) dispatch.severity_score = 0;
     if (dispatch.severity_score > 10) dispatch.severity_score = 10;
     
-    // Enforce logic gate rules
-    if (dispatch.severity_score < 5) {
+    // Handle "No Hazard Detected" case explicitly
+    if (dispatch.hazard_type === 'No Hazard Detected' || dispatch.severity_score <= 2) {
       dispatch.recommended_action = 'none';
       dispatch.status_level = 'stable';
-    } else if (dispatch.severity_score >= 7) {
+      if (dispatch.severity_score <= 2) {
+        dispatch.hazard_type = 'No Hazard Detected';
+        dispatch.visual_evidence_summary = dispatch.visual_evidence_summary || 'No emergency detected in this image';
+      }
+    }
+    // Enforce logic gate rules - Call button ONLY appears when severity > 7
+    else if (dispatch.severity_score <= 4) {
+      dispatch.recommended_action = 'none';
+      dispatch.status_level = 'stable';
+    } else if (dispatch.severity_score > 7) {
+      // CRITICAL: Severity > 7 triggers emergency dialer
       dispatch.status_level = 'critical';
       // Ensure a call action is assigned for critical situations
       if (dispatch.recommended_action === 'none') {
@@ -514,12 +527,16 @@ Return ONLY a valid JSON object (no markdown, no explanation):
           dispatch.recommended_action = 'call_102';
         } else if (dispatch.hazard_type === 'Crime') {
           dispatch.recommended_action = 'call_100';
+        } else if (dispatch.hazard_type === 'Flood' || dispatch.hazard_type === 'Collapse') {
+          dispatch.recommended_action = 'call_101'; // Fire dept handles rescue
         } else {
           dispatch.recommended_action = 'call_102'; // Default to ambulance for critical unknowns
         }
       }
     } else {
+      // Severity 5-7: monitoring, no automatic call
       dispatch.status_level = 'monitoring';
+      dispatch.recommended_action = 'none'; // No call button for monitoring level
     }
 
     // Set authority_assigned based on recommended_action
@@ -534,13 +551,15 @@ Return ONLY a valid JSON object (no markdown, no explanation):
     return dispatch;
   } catch (error) {
     console.error("[v0] Emergency dispatch analysis error:", error);
+    // Return explicit "No Hazard Detected" on error instead of ambiguous "Other"
     return {
-      hazard_type: 'Other',
-      severity_score: 5,
+      hazard_type: 'No Hazard Detected',
+      severity_score: 0,
       recommended_action: 'none',
-      status_level: 'monitoring',
-      visual_evidence_summary: 'Unable to analyze image - manual assessment required',
-      equipment_needed: ['First aid kit', 'Flashlight', 'Protective gloves', 'Communication radio'],
+      status_level: 'stable',
+      visual_evidence_summary: 'Analysis failed - please retake photo or describe emergency manually',
+      equipment_needed: [],
+      authority_assigned: 'None',
     };
   }
 }
