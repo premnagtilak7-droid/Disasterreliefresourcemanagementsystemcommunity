@@ -201,19 +201,30 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
     reader.readAsDataURL(file);
   };
 
-  // Analyze photo with Emergency Dispatcher AI
+  // Analyze photo with Emergency Dispatcher AI - passes helpMessage as context
   const analyzePhotoWithAI = async (base64Image: string) => {
     setIsAnalyzing(true);
     setAnalysisError(null);
     
     try {
       console.log('[v0] Starting Emergency Dispatcher AI analysis...');
-      const result = await analyzeEmergencyDispatch(base64Image);
+      console.log('[v0] User context message:', helpMessage || '(none)');
+      
+      // Pass the help message as context for AI to prioritize
+      const result = await analyzeEmergencyDispatch(base64Image, helpMessage);
       
       // Log full AI response to console for debugging
       console.log('[v0] Emergency Dispatcher AI Response:', JSON.stringify(result, null, 2));
       
       setDispatchResult(result);
+      
+      // Handle Manual Override status (AI analysis failed)
+      if (result.status_level === 'manual_override') {
+        toast.warning('AI analysis failed - please describe your emergency manually or call services directly', {
+          duration: 8000,
+        });
+        return;
+      }
       
       // Show popup modal ONLY if severity > 7 (triggers emergency dialer)
       if (result.severity_score > 7 && result.recommended_action !== 'none') {
@@ -640,17 +651,20 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
                   <div className={`p-3 rounded-lg border-2 ${
                     dispatchResult.status_level === 'critical' 
                       ? 'bg-red-50 dark:bg-red-950/50 border-red-500' 
-                      : dispatchResult.status_level === 'monitoring'
-                        ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-400'
-                        : 'bg-green-50 dark:bg-green-950/50 border-green-400'
+                      : dispatchResult.status_level === 'manual_override'
+                        ? 'bg-orange-50 dark:bg-orange-950/50 border-orange-500'
+                        : dispatchResult.status_level === 'monitoring'
+                          ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-400'
+                          : 'bg-green-50 dark:bg-green-950/50 border-green-400'
                   }`}>
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-semibold text-sm">AI Dispatcher</span>
                       <Badge className={
                         dispatchResult.status_level === 'critical' ? 'bg-red-600' : 
+                        dispatchResult.status_level === 'manual_override' ? 'bg-orange-600' :
                         dispatchResult.status_level === 'monitoring' ? 'bg-amber-500' : 'bg-green-600'
                       }>
-                        {dispatchResult.status_level.toUpperCase()}
+                        {dispatchResult.status_level === 'manual_override' ? 'MANUAL OVERRIDE' : dispatchResult.status_level.toUpperCase()}
                       </Badge>
                     </div>
                     <div className="space-y-1 text-sm">
@@ -670,6 +684,43 @@ export function PanicForm({ userId, onSuccess, onBack }: PanicFormProps) {
                           Call Now: {getEmergencyLabel(dispatchResult.recommended_action)}
                         </Button>
                       </a>
+                    )}
+                    
+                    {/* Manual Override - Show direct call buttons */}
+                    {dispatchResult.status_level === 'manual_override' && (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-xs text-orange-700 dark:text-orange-400 font-medium">
+                          Manual Emergency Call Options:
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                          <a href="tel:101" className="block">
+                            <Button variant="outline" size="sm" className="w-full text-xs border-red-300 text-red-700">
+                              Fire (101)
+                            </Button>
+                          </a>
+                          <a href="tel:102" className="block">
+                            <Button variant="outline" size="sm" className="w-full text-xs border-blue-300 text-blue-700">
+                              Ambulance (102)
+                            </Button>
+                          </a>
+                          <a href="tel:100" className="block">
+                            <Button variant="outline" size="sm" className="w-full text-xs border-slate-300 text-slate-700">
+                              Police (100)
+                            </Button>
+                          </a>
+                        </div>
+                        {photo && (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="w-full mt-2"
+                            onClick={() => analyzePhotoWithAI(photo)}
+                            disabled={isAnalyzing}
+                          >
+                            {isAnalyzing ? 'Re-analyzing...' : 'Re-analyze with Help Message'}
+                          </Button>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}

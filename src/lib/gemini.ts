@@ -392,10 +392,10 @@ export async function analyzeAndUpdateAlert(
 // ============ EMERGENCY DISPATCHER & RISK ASSESSMENT AI ============
 
 export interface EmergencyDispatchResult {
-  hazard_type: 'Fire' | 'Flood' | 'Medical' | 'Crime' | 'Collapse' | 'Gas Leak' | 'Electrical' | 'No Hazard Detected' | 'Other';
+  hazard_type: 'Fire' | 'Flood' | 'Medical' | 'Crime' | 'Collapse' | 'Gas Leak' | 'Electrical' | 'No Hazard Detected' | 'Manual Override' | 'Other';
   severity_score: number; // 1-10
   recommended_action: 'call_101' | 'call_102' | 'call_100' | 'none';
-  status_level: 'critical' | 'stable' | 'monitoring';
+  status_level: 'critical' | 'stable' | 'monitoring' | 'manual_override';
   visual_evidence_summary: string;
   equipment_needed: string[];
   secondary_risks?: string[];
@@ -412,9 +412,10 @@ export interface EmergencyDispatchResult {
  * - 100: Police
  * 
  * @param base64Image - Base64 encoded image of the emergency scene
+ * @param contextMessage - Optional text context from user's help message (e.g., "fire", "flood")
  * @returns Emergency dispatch result with routing and equipment recommendations
  */
-export async function analyzeEmergencyDispatch(base64Image: string): Promise<EmergencyDispatchResult> {
+export async function analyzeEmergencyDispatch(base64Image: string, contextMessage?: string): Promise<EmergencyDispatchResult> {
   // Check if API key exists
   if (!import.meta.env.VITE_GEMINI_API_KEY) {
     return {
@@ -440,37 +441,54 @@ export async function analyzeEmergencyDispatch(base64Image: string): Promise<Eme
       }
     });
 
+    // Build context-aware prompt
+    const userContext = contextMessage?.trim() 
+      ? `\n\nUSER CONTEXT MESSAGE: "${contextMessage}"\nIMPORTANT: The user has described their emergency as above. PRIORITIZE this context in your analysis. If they mention "fire", "flood", "injured", "trapped", etc., treat this as HIGH PRIORITY even if the image is unclear.\n`
+      : '';
+
     const prompt = `You are a Senior Emergency Dispatcher & Risk Assessment AI. Analyze this image with high precision.
 
+CRITICAL INSTRUCTION - IMAGE ANALYSIS:
+You MUST analyze the CONTENT of the image, even if:
+- It appears to be a photo of a screen or monitor
+- It looks like a digital image, screenshot, or video frame
+- The image quality is poor or grainy
+- The scene is partially obscured
+Look for ANY signs of emergency: flames, smoke, water damage, injured persons, structural damage, etc.
+DO NOT dismiss an image just because it looks digital - analyze what is SHOWN in the content.
+${userContext}
 HAZARD IDENTIFICATION:
 1. Identify the PRIMARY emergency: Fire, Flood, Medical, Crime, Collapse, Gas Leak, Electrical
-2. If NO EMERGENCY or HAZARD is visible (e.g., normal scene, safe environment, no danger), set hazard_type to "No Hazard Detected"
+2. ONLY set "No Hazard Detected" if you are CERTAIN there is no emergency visible AND the user has not indicated an emergency in their message
 3. Look for SECONDARY RISKS (e.g., live wires in a flood, gas leaks in a fire, structural collapse risk)
+4. If the image shows flames, smoke, fire trucks, or burning materials - this IS a Fire hazard
+5. If you see water where it shouldn't be, flooding, or water damage - this IS a Flood hazard
 
 CONTEXTUAL SEVERITY (1-10):
-- Rate 0-2 (NO HAZARD): No emergency visible, safe scene, false alarm
-- Rate 3-4 (STABLE): Minor incidents, controlled small fires, minor injuries, property damage only
-- Rate 5-6 (ELEVATED/MONITORING): Potential for escalation, needs monitoring, moderate injuries
-- Rate 7-10 (CRITICAL): Immediate life-threat, unconscious victims, spreading fire, rising floodwater, trapped persons
+- Rate 1-2 (NO HAZARD): Absolutely certain no emergency, safe scene confirmed
+- Rate 3-4 (STABLE): Minor incidents, small controlled situations, minor property damage
+- Rate 5-6 (ELEVATED/MONITORING): Potential danger, needs monitoring, moderate risk
+- Rate 7-10 (CRITICAL): Active fire, spreading flames, visible injuries, trapped persons, life-threat
 
 AUTONOMOUS ROUTING - Assign the correct emergency authority:
-- "call_101" = Fire Department (fires, gas leaks, hazmat, rescue from heights/depths)
+- "call_101" = Fire Department (ANY fire, smoke, gas leaks, hazmat, rescue)
 - "call_102" = Ambulance/Medical (injuries, medical emergencies, unconscious persons)
 - "call_100" = Police (crimes, civil disturbance, traffic accidents, security threats)
-- "none" = No emergency services needed
+- "none" = Only when absolutely certain no emergency exists
 
 LOGIC GATE (MANDATORY):
-- If NO hazard detected OR severity_score <= 4: recommended_action MUST be "none", hazard_type should be "No Hazard Detected" if nothing dangerous
-- If severity_score >= 5 and < 7: recommended_action based on hazard type
-- If severity_score > 7: recommended_action MUST be the appropriate call command (this triggers emergency dialer)
+- If severity_score <= 4 AND no hazard visible AND no user context indicating emergency: recommended_action = "none"
+- If severity_score >= 5 and <= 7: recommended_action based on hazard type
+- If severity_score > 7: recommended_action MUST be the appropriate call command (triggers emergency dialer)
+- If user mentions emergency keywords (fire, flood, help, trapped, injured) but image unclear: DEFAULT to severity 6+ and appropriate hazard type
 
 RESOURCE PRESCRIPTION:
-Generate a specific equipment checklist for the first responder based on what you see. If no hazard, return empty array.
+Generate a specific equipment checklist for the first responder based on the hazard type.
 
 Return ONLY a valid JSON object (no markdown, no explanation):
 {
   "hazard_type": "Fire" | "Flood" | "Medical" | "Crime" | "Collapse" | "Gas Leak" | "Electrical" | "No Hazard Detected",
-  "severity_score": 0-10,
+  "severity_score": 1-10,
   "recommended_action": "call_101" | "call_102" | "call_100" | "none",
   "status_level": "critical" | "stable" | "monitoring",
   "visual_evidence_summary": "1-sentence description of what you see in the image",
@@ -551,15 +569,15 @@ Return ONLY a valid JSON object (no markdown, no explanation):
     return dispatch;
   } catch (error) {
     console.error("[v0] Emergency dispatch analysis error:", error);
-    // Return explicit "No Hazard Detected" on error instead of ambiguous "Other"
+    // Return "Manual Override" status on error - allows user to manually assess
     return {
-      hazard_type: 'No Hazard Detected',
-      severity_score: 0,
+      hazard_type: 'Manual Override',
+      severity_score: 5, // Default to monitoring level, not 0
       recommended_action: 'none',
-      status_level: 'stable',
-      visual_evidence_summary: 'Analysis failed - please retake photo or describe emergency manually',
-      equipment_needed: [],
-      authority_assigned: 'None',
+      status_level: 'manual_override',
+      visual_evidence_summary: 'AI analysis failed - MANUAL ASSESSMENT REQUIRED. Please describe your emergency in the help message or call emergency services directly if urgent.',
+      equipment_needed: ['First aid kit', 'Flashlight', 'Communication device'],
+      authority_assigned: 'Manual Assessment Required',
     };
   }
 }
