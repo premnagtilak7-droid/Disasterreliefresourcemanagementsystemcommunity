@@ -17,6 +17,8 @@ import {
 import { VolunteerMapView } from '../VolunteerMapView';
 import { VolunteerSettings } from '../VolunteerSettings';
 import { RescueHistory } from '../RescueHistory';
+import { VolunteerVerification } from '../VolunteerVerification';
+import { VolunteerVerificationResult } from '@/lib/gemini';
 import { 
   getResolvedCountByVolunteer, 
   subscribeToPendingAlerts, 
@@ -36,6 +38,12 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
   const [pendingNearby, setPendingNearby] = useState(0);
   const [pendingAlerts, setPendingAlerts] = useState<AlertWithId[]>([]);
   const [isResolving, setIsResolving] = useState<string | null>(null);
+  const [isVerified, setIsVerified] = useState<boolean>(() => {
+    // Check localStorage for previous verification
+    const saved = localStorage.getItem(`volunteer_verified_${user.id}`);
+    return saved === 'true';
+  });
+  const [verificationData, setVerificationData] = useState<VolunteerVerificationResult | null>(null);
 
   // Fetch volunteer stats on mount and when resolving alerts
   useEffect(() => {
@@ -68,6 +76,31 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
       setIsResolving(null);
     }
   };
+
+  // Handle volunteer verification completion
+  const handleVerificationComplete = (result: VolunteerVerificationResult) => {
+    setVerificationData(result);
+    if (result.isVerified) {
+      setIsVerified(true);
+      localStorage.setItem(`volunteer_verified_${user.id}`, 'true');
+      toast.success(`Welcome, ${result.name}! You are now a verified volunteer.`);
+    }
+  };
+
+  const handleSkipVerification = () => {
+    setIsVerified(true); // Allow access but without full verification
+    toast.info('Proceeding without verification. Some features may be limited.');
+  };
+
+  // Show verification screen if volunteer is not verified and requests it
+  if (activeView === 'verify') {
+    return (
+      <VolunteerVerification 
+        onVerificationComplete={handleVerificationComplete}
+        onSkip={() => setActiveView('dashboard')}
+      />
+    );
+  }
 
   if (activeView === 'settings') {
     return <VolunteerSettings user={user} />;
@@ -244,12 +277,57 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-semibold mb-2">Welcome, {user.name}</h1>
-        <p className="text-muted-foreground">
-          Ready to make a difference in disaster relief operations
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold mb-2">Welcome, {user.name}</h1>
+          <p className="text-muted-foreground">
+            Ready to make a difference in disaster relief operations
+          </p>
+        </div>
+        {/* Verification Badge */}
+        {isVerified ? (
+          <Badge className="bg-green-600 text-white flex items-center gap-1">
+            <CheckCircle className="h-3 w-3" />
+            Verified
+          </Badge>
+        ) : (
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => setActiveView('verify')}
+            className="border-blue-300 text-blue-600 hover:bg-blue-50"
+          >
+            <Award className="h-4 w-4 mr-1" />
+            Verify ID
+          </Button>
+        )}
       </div>
+
+      {/* Verification Prompt for Unverified Volunteers */}
+      {!isVerified && (
+        <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                <Award className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="font-medium text-blue-800 dark:text-blue-300">Complete Your Verification</p>
+                <p className="text-sm text-blue-600 dark:text-blue-400">
+                  Upload your Government ID or Rescue Certificate to get verified
+                </p>
+              </div>
+            </div>
+            <Button 
+              size="sm" 
+              onClick={() => setActiveView('verify')}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Verify Now
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Performance Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
