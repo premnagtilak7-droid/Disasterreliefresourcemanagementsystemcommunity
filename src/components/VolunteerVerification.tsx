@@ -26,6 +26,8 @@ interface VolunteerVerificationProps {
 
 export function VolunteerVerification({ onVerificationComplete, onSkip }: VolunteerVerificationProps) {
   const [documentImage, setDocumentImage] = useState<string | null>(null);
+  const [documentFileName, setDocumentFileName] = useState<string>('');
+  const [documentFileType, setDocumentFileType] = useState<string>('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<VolunteerVerificationResult | null>(null);
   const [verificationProgress, setVerificationProgress] = useState(0);
@@ -48,6 +50,10 @@ export function VolunteerVerification({ onVerificationComplete, onSkip }: Volunt
       return;
     }
 
+    // Store file metadata for stricter validation
+    setDocumentFileName(file.name);
+    setDocumentFileType(file.type);
+    
     const reader = new FileReader();
     reader.onloadend = () => {
       setDocumentImage(reader.result as string);
@@ -56,7 +62,7 @@ export function VolunteerVerification({ onVerificationComplete, onSkip }: Volunt
     reader.readAsDataURL(file);
   };
 
-  const handleVerify = () => {
+  const handleVerify = async () => {
     if (!documentImage) {
       toast.error('Please upload a document image first');
       return;
@@ -65,15 +71,15 @@ export function VolunteerVerification({ onVerificationComplete, onSkip }: Volunt
     setIsVerifying(true);
     setVerificationProgress(50);
 
-    // Synchronous verification - no API call
-    const result = verifyVolunteerDocument(documentImage);
+    // Pass file metadata for stricter validation
+    const result = await verifyVolunteerDocument(documentImage, documentFileName, documentFileType);
     setVerificationProgress(100);
     setVerificationResult(result);
     
     if (result.isVerified) {
       toast.success('Document verified successfully!');
     } else {
-      toast.error(result.rejectionReason || 'Please upload a clear photo of your ID card or certificate in good lighting.');
+      toast.error(result.rejectionReason || 'Please upload a valid Government ID card photo, not a poster or banner image.');
     }
     
     setIsVerifying(false);

@@ -627,23 +627,61 @@ export interface VolunteerVerificationResult {
 }
 
 /**
- * Frontend-only Identity Verification - FILE SIZE CHECK ONLY
- * No API calls, no AI, just checks if file > 10KB
+ * Frontend-only Identity Verification - Strict validation
+ * Checks: file size > 50KB, valid image type, not a poster/banner, portrait/square aspect ratio
  */
-export function verifyVolunteerIdentity(base64Image: string): VolunteerVerificationResult {
-  // Calculate file size from base64 (base64 is ~33% larger than original)
+export async function verifyVolunteerIdentity(
+  base64Image: string, 
+  fileName?: string, 
+  fileType?: string
+): Promise<VolunteerVerificationResult> {
+  const rejectionReasons: string[] = [];
+  
+  // 1. Calculate file size from base64 (base64 is ~33% larger than original)
   const cleanBase64 = extractBase64Data(base64Image);
   const fileSizeBytes = Math.ceil((cleanBase64.length * 3) / 4);
-  const verified = fileSizeBytes > 10000;
+  const fileSizeKB = fileSizeBytes / 1024;
+  const sizeOk = fileSizeKB > 50;
+  if (!sizeOk) rejectionReasons.push(`File too small (${fileSizeKB.toFixed(0)}KB, need >50KB)`);
+  
+  // 2. Check file type is image/jpeg or image/png
+  const detectedType = detectMimeType(base64Image);
+  const typeOk = detectedType === 'image/jpeg' || detectedType === 'image/png' || 
+                 fileType === 'image/jpeg' || fileType === 'image/png';
+  if (!typeOk) rejectionReasons.push('File must be JPEG or PNG image');
+  
+  // 3. Check filename doesn't contain poster/banner/logo/food/menu
+  const invalidNamePatterns = /poster|banner|logo|food|menu|flyer|ad|advertisement/i;
+  const nameOk = !fileName || !invalidNamePatterns.test(fileName);
+  if (!nameOk) rejectionReasons.push('Filename suggests this is not an ID document');
+  
+  // 4. Check aspect ratio - ID cards are portrait or near-square (height >= width × 0.6)
+  let aspectOk = true;
+  try {
+    const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.width, height: img.height });
+      img.onerror = () => resolve({ width: 1, height: 1 }); // Default to square on error
+      img.src = base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${cleanBase64}`;
+    });
+    // ID cards are never wide banners - height should be at least 60% of width
+    aspectOk = dimensions.height >= dimensions.width * 0.6;
+    if (!aspectOk) rejectionReasons.push('Image is too wide (banner-like). ID cards are portrait or square.');
+  } catch {
+    aspectOk = true; // Allow on error
+  }
+  
+  // ALL conditions must pass
+  const verified = sizeOk && typeOk && nameOk && aspectOk;
   
   return {
     isVerified: verified,
     name: verified ? 'Document Verified' : '',
-    documentType: verified ? 'Other' : 'Invalid',
+    documentType: verified ? 'Government ID' : 'Invalid',
     expiryStatus: verified ? 'valid' : 'not_applicable',
     isVolunteerAuthorized: verified,
     confidence_score: verified ? 90 : 0,
-    rejectionReason: verified ? undefined : 'Please upload a real ID photo',
+    rejectionReason: verified ? undefined : 'Please upload a valid Government ID card photo, not a poster or banner image. ' + rejectionReasons.join('. '),
     extractedDetails: verified ? { issuingAuthority: 'Document verified' } : undefined,
   };
 }
@@ -765,15 +803,50 @@ export interface VolunteerVerificationResult {
 }
 
 /**
- * Volunteer Document Verification - FILE SIZE CHECK ONLY
- * No API calls - just checks if file > 10KB
- * This works 100% of the time for any real photo upload
+ * Volunteer Document Verification - Strict validation
+ * Checks: file size > 50KB, valid image type, not a poster/banner, portrait/square aspect ratio
  */
-export function verifyVolunteerDocument(base64Image: string): VolunteerVerificationResult {
-  // Calculate file size from base64 (base64 is ~33% larger than original)
+export async function verifyVolunteerDocument(
+  base64Image: string, 
+  fileName?: string, 
+  fileType?: string
+): Promise<VolunteerVerificationResult> {
+  const rejectionReasons: string[] = [];
+  
+  // 1. File size > 50KB
   const cleanBase64 = extractBase64Data(base64Image);
   const fileSizeBytes = Math.ceil((cleanBase64.length * 3) / 4);
-  const verified = fileSizeBytes > 10000;
+  const fileSizeKB = fileSizeBytes / 1024;
+  const sizeOk = fileSizeKB > 50;
+  if (!sizeOk) rejectionReasons.push(`File too small (${fileSizeKB.toFixed(0)}KB)`);
+  
+  // 2. File type must be JPEG or PNG
+  const detectedType = detectMimeType(base64Image);
+  const typeOk = detectedType === 'image/jpeg' || detectedType === 'image/png' || 
+                 fileType === 'image/jpeg' || fileType === 'image/png';
+  if (!typeOk) rejectionReasons.push('Must be JPEG or PNG');
+  
+  // 3. Filename must NOT contain poster/banner/logo/food/menu
+  const invalidNamePatterns = /poster|banner|logo|food|menu|flyer|ad|advertisement/i;
+  const nameOk = !fileName || !invalidNamePatterns.test(fileName);
+  if (!nameOk) rejectionReasons.push('Not an ID document');
+  
+  // 4. Aspect ratio - height >= width × 0.6 (ID cards are portrait/square, not wide banners)
+  let aspectOk = true;
+  try {
+    const dimensions = await new Promise<{ width: number; height: number }>((resolve) => {
+      const img = new Image();
+      img.onload = () => resolve({ width: img.width, height: img.height });
+      img.onerror = () => resolve({ width: 1, height: 1 });
+      img.src = base64Image.startsWith('data:') ? base64Image : `data:image/jpeg;base64,${cleanBase64}`;
+    });
+    aspectOk = dimensions.height >= dimensions.width * 0.6;
+    if (!aspectOk) rejectionReasons.push('Image is too wide (banner-like)');
+  } catch {
+    aspectOk = true;
+  }
+  
+  const verified = sizeOk && typeOk && nameOk && aspectOk;
   
   return {
     isVerified: verified,
@@ -781,8 +854,8 @@ export function verifyVolunteerDocument(base64Image: string): VolunteerVerificat
     documentType: verified ? 'Government ID' : 'Unknown',
     expiryStatus: verified ? 'valid' : 'not_found',
     isVolunteerAuthorized: verified,
-    confidence_score: verified ? 0.9 : 0, // Return as 0-1 for UI compatibility
-    rejectionReason: verified ? undefined : 'Please upload a real ID photo',
+    confidence_score: verified ? 0.9 : 0,
+    rejectionReason: verified ? undefined : 'Please upload a valid Government ID card photo, not a poster or banner image. ' + rejectionReasons.join('. '),
   };
 }
 

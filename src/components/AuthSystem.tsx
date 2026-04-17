@@ -56,6 +56,8 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
   
   // Volunteer Document Verification State
   const [documentImage, setDocumentImage] = useState<string | null>(null);
+  const [documentFileName, setDocumentFileName] = useState<string>('');
+  const [documentFileType, setDocumentFileType] = useState<string>('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<VolunteerVerificationResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -71,6 +73,10 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
       return;
     }
 
+    // Store file metadata for stricter validation
+    setDocumentFileName(file.name);
+    setDocumentFileType(file.type);
+    
     // Convert to Base64
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -81,8 +87,8 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
     reader.readAsDataURL(file);
   };
 
-  // Verify the uploaded document - simple file size check (no API)
-  const handleVerifyDocument = () => {
+  // Verify the uploaded document with strict validation
+  const handleVerifyDocument = async () => {
     if (!documentImage) {
       toast.error('Please upload a document first');
       return;
@@ -90,14 +96,14 @@ export function AuthSystem({ onLogin }: AuthSystemProps) {
 
     setIsVerifying(true);
     
-    // Synchronous - no await needed
-    const result = verifyVolunteerDocument(documentImage);
+    // Pass file metadata for stricter validation
+    const result = await verifyVolunteerDocument(documentImage, documentFileName, documentFileType);
     setVerificationResult(result);
     
     if (result.isVerified) {
       toast.success('Document verified successfully!');
     } else {
-      toast.error(result.rejectionReason || 'Please upload a clear photo of your ID card or certificate in good lighting.');
+      toast.error(result.rejectionReason || 'Please upload a valid Government ID card photo, not a poster or banner image.');
     }
     
     setIsVerifying(false);
