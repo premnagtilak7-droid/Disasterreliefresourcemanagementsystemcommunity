@@ -11,7 +11,11 @@ import {
   Award,
   Clock
 } from 'lucide-react';
-import { subscribeToRescueHistory, RescueHistoryItem } from '@/lib/alerts';
+import { 
+  subscribeToRescueHistory, 
+  getResolvedCountByVolunteer,
+  RescueHistoryItem 
+} from '@/lib/alerts';
 
 interface RescueHistoryProps {
   volunteerId: string;
@@ -19,8 +23,10 @@ interface RescueHistoryProps {
 
 export function RescueHistory({ volunteerId }: RescueHistoryProps) {
   const [history, setHistory] = useState<RescueHistoryItem[]>([]);
+  const [peopleHelped, setPeopleHelped] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Subscribe to rescue history from rescueHistory collection
   useEffect(() => {
     const unsubscribe = subscribeToRescueHistory(volunteerId, (items) => {
       setHistory(items);
@@ -28,6 +34,15 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
     });
 
     return () => unsubscribe();
+  }, [volunteerId]);
+
+  // Fetch people helped count
+  useEffect(() => {
+    async function fetchStats() {
+      const count = await getResolvedCountByVolunteer(volunteerId);
+      setPeopleHelped(count);
+    }
+    fetchStats();
   }, [volunteerId]);
 
   const formatDate = (timestamp: unknown) => {
@@ -84,7 +99,7 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
         <Card>
           <CardContent className="p-4 text-center">
             <User className="h-8 w-8 text-blue-500 mx-auto mb-2" />
-            <p className="text-2xl font-bold">{history.length}</p>
+            <p className="text-2xl font-bold">{peopleHelped}</p>
             <p className="text-sm text-muted-foreground">People Helped</p>
           </CardContent>
         </Card>
@@ -124,10 +139,10 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
           {history.map((item, index) => (
             <Card key={item.id} className="overflow-hidden">
               <div className="flex">
-                {item.photoURL && (
+                {(item.photoURL || item.imageUrl) && (
                   <div className="w-32 h-32 flex-shrink-0">
                     <img 
-                      src={item.photoURL} 
+                      src={item.photoURL || item.imageUrl} 
                       alt="Rescue scene" 
                       className="w-full h-full object-cover"
                     />
@@ -149,11 +164,11 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
                       <User className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{item.name}</span>
+                      <span className="font-medium">{item.name || 'Unknown'}</span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                       <MapPin className="h-4 w-4" />
-                      <span>{item.location}</span>
+                      <span>{item.location || 'Location not recorded'}</span>
                     </div>
                     {item.phone && (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -162,12 +177,6 @@ export function RescueHistory({ volunteerId }: RescueHistoryProps) {
                       </div>
                     )}
                   </div>
-
-                  {item.visionAnalysis && (
-                    <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/30 rounded text-sm">
-                      <span className="font-medium">AI Analysis:</span> Severity {item.visionAnalysis.severity}/10 - {item.visionAnalysis.primaryNeed}
-                    </div>
-                  )}
                 </div>
               </div>
             </Card>

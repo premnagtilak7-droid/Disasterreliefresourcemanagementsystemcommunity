@@ -1,6 +1,5 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { User } from './AuthSystem';
-import { submitSOS } from '@/lib/alerts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -23,11 +22,13 @@ import {
   Camera,
   Upload,
   Loader2,
-  X
+  X,
+  Siren
 } from 'lucide-react';
-import { storage } from '@/lib/firebase';
+import { storage, db } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { analyzeAndUpdateAlert, analyzeBase64Photo, VisionAnalysis } from '@/lib/gemini';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { analyzeBase64Photo, VisionAnalysis, isGeminiConfigured, analyzeEmergencyDispatch, EmergencyDispatchResult } from '@/lib/gemini';
 import { toast } from 'sonner';
 
 interface AidRequestFormProps {
@@ -71,8 +72,66 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [instantAnalysis, setInstantAnalysis] = useState<VisionAnalysis | null>(null);
+  const [emergencyDispatch, setEmergencyDispatch] = useState<EmergencyDispatchResult | null>(null);
+  const [autoCallCountdown, setAutoCallCountdown] = useState<number | null>(null);
+  const [showAutoCallModal, setShowAutoCallModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get emergency number based on recommended action
+  const getEmergencyNumber = (action: string): string => {
+    switch (action) {
+      case 'call_101': return '101';
+      case 'call_102': return '102';
+      case 'call_100': return '100';
+      default: return '112';
+    }
+  };
+
+  // Start 2-second countdown then auto-trigger dialer
+  const startAutoCallCountdown = (emergencyNumber: string) => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    
+    setAutoCallCountdown(2);
+    setShowAutoCallModal(true);
+    
+    countdownRef.current = setInterval(() => {
+      setAutoCallCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          if (countdownRef.current) {
+            clearInterval(countdownRef.current);
+            countdownRef.current = null;
+          }
+          // Auto-trigger the dialer
+          window.location.href = `tel:${emergencyNumber}`;
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Cancel auto-call
+  const cancelAutoCall = () => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    setAutoCallCountdown(null);
+    setShowAutoCallModal(false);
+    toast.info('Auto-call cancelled');
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
+  
+  // Check if Gemini API key is configured
+  const geminiConfigured = isGeminiConfigured();
 
   // Compress image using canvas for faster Gemini analysis
   const compressImage = (file: File): Promise<string> => {
@@ -113,6 +172,7 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
     if (file) {
       setPhotoFile(file);
       setInstantAnalysis(null);
+      setEmergencyDispatch(null);
       
       // Create preview
       const reader = new FileReader();
@@ -124,24 +184,36 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
       // Compress and analyze with Gemini IMMEDIATELY (before Firebase upload)
       try {
         setIsAnalyzing(true);
-        toast.loading('AI analyzing photo...');
+        toast.loading('AI Emergency Dispatcher analyzing photo...');
         
         const compressed = await compressImage(file);
         setCompressedBase64(compressed);
         
-        // Instant Gemini analysis with compressed image
-        const analysis = await analyzeBase64Photo(compressed);
-        setInstantAnalysis(analysis);
+        // Run both analyses in parallel - pass description text for context priority
+        const [basicAnalysis, dispatchAnalysis] = await Promise.all([
+          analyzeBase64Photo(compressed),
+          analyzeEmergencyDispatch(compressed, formData.description) // Pass user's text description
+        ]);
+        
+        setInstantAnalysis(basicAnalysis);
+        setEmergencyDispatch(dispatchAnalysis);
         toast.dismiss();
         
-        if (analysis.description?.includes('API key not configured')) {
+        if (basicAnalysis.description?.includes('API key not configured')) {
           toast.warning('AI analysis unavailable - photo will still be uploaded');
-        } else if (analysis.isFalseAlarm) {
-          toast.error(`False Alarm Detected: ${analysis.falseAlarmReason || 'Not a disaster image'}`);
-        } else if (analysis.description === 'Unable to analyze photo') {
-          toast.warning('AI could not analyze photo - manual review needed');
+        } else if (basicAnalysis.isFalseAlarm) {
+          toast.error(`False Alarm Detected: ${basicAnalysis.falseAlarmReason || 'Not a disaster image'}`);
+        } else if (dispatchAnalysis.severity_score >= 7 && dispatchAnalysis.recommended_action !== 'none') {
+          // Severity >= 7: Start 2-second auto-call countdown
+          const emergencyNumber = getEmergencyNumber(dispatchAnalysis.recommended_action);
+          toast.error(`CRITICAL: ${dispatchAnalysis.hazard_type} - Auto-calling ${dispatchAnalysis.authority_assigned} in 2s!`, {
+            duration: 5000,
+          });
+          startAutoCallCountdown(emergencyNumber);
+        } else if (dispatchAnalysis.status_level === 'monitoring') {
+          toast.warning(`${dispatchAnalysis.hazard_type} detected - Severity ${dispatchAnalysis.severity_score}/10`);
         } else {
-          toast.success(`AI Analysis: Severity ${analysis.severity}/10 - ${analysis.primaryNeed}`);
+          toast.success(`AI Analysis: ${dispatchAnalysis.hazard_type} - Severity ${dispatchAnalysis.severity_score}/10`);
         }
       } catch (error) {
         console.error('Analysis error:', error);
@@ -157,6 +229,7 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
     setPhotoPreview(null);
     setCompressedBase64(null);
     setInstantAnalysis(null);
+    setEmergencyDispatch(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
@@ -181,57 +254,88 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Block submission if false alarm detected
-    if (instantAnalysis?.isFalseAlarm) {
-      toast.error('Cannot submit: Image detected as false alarm. Please upload a real disaster photo.');
+    // RELAXED VALIDATION: Only Phone Number and Location are required
+    if (!formData.contactPhone.trim()) {
+      toast.error('Phone Number is required.');
+      return;
+    }
+    if (!formData.location.trim()) {
+      toast.error('Location is required.');
       return;
     }
     
     setIsSubmitting(true);
-    const tempAlertId = `alert_${Date.now()}`;
     
     try {
-      // Start photo upload in background (don't await yet)
-      let photoUploadPromise: Promise<string | null> = Promise.resolve(null);
-      if (photoFile) {
-        toast.loading('Submitting request...');
-        photoUploadPromise = uploadPhoto(tempAlertId);
+      toast.loading('Submitting request...');
+      
+      // CONDITIONAL BASE64 LOGIC: Only process photo if it exists
+      let imageUrl: string | null = null;
+      if (compressedBase64) {
+        // Use the already-compressed base64 string (smaller, faster)
+        imageUrl = `data:image/jpeg;base64,${compressedBase64}`;
       }
       
-      // Submit SOS alert immediately with instant analysis data
-      const alertId = await submitSOS({
+      // Build special circumstances object
+      const specialCircumstances = {
+        hasDisabilities: formData.hasDisabilities,
+        hasChildren: formData.hasChildren,
+        hasElderly: formData.hasElderly,
+        additionalNeeds: formData.additionalNeeds || null,
+      };
+      
+      // DIRECT FIRESTORE WRITE to 'emergency_alerts' collection (unified collection)
+      const alertData = {
+        // User identification for filtering
+        userId: user.id,
         name: user.name,
         phone: formData.contactPhone,
+        // Location data with coordinates for 2km radius filtering
         location: formData.location,
-        emergencyType: formData.aidType,
-        description: formData.description,
-        latitude: coordinates?.latitude,
-        longitude: coordinates?.longitude,
-        photoURL: null, // Will update after upload completes
-        // Include instant analysis in the alert
+        latitude: coordinates?.latitude || null,
+        longitude: coordinates?.longitude || null,
+        // Request details
+        description: formData.description || null,
+        imageUrl: imageUrl,
+        photoURL: imageUrl, // Also store as photoURL for compatibility
+        specialCircumstances: specialCircumstances,
+        // Status for workflow
+        status: 'pending',
+        createdAt: serverTimestamp(),
+        // Additional fields for context
+        emergencyType: formData.aidType || 'General',
+        priority: formData.priority || 'medium',
+        peopleCount: formData.peopleCount ? parseInt(formData.peopleCount) : 1,
         visionAnalysis: instantAnalysis ? {
           severity: instantAnalysis.severity,
           primaryNeed: instantAnalysis.primaryNeed,
           description: instantAnalysis.description,
           isFalseAlarm: instantAnalysis.isFalseAlarm,
-        } : undefined,
-      });
+        } : null,
+        // Emergency Dispatcher Analysis
+        emergencyDispatch: emergencyDispatch ? {
+          hazard_type: emergencyDispatch.hazard_type,
+          severity_score: emergencyDispatch.severity_score,
+          recommended_action: emergencyDispatch.recommended_action,
+          status_level: emergencyDispatch.status_level,
+          visual_evidence_summary: emergencyDispatch.visual_evidence_summary,
+          equipment_needed: emergencyDispatch.equipment_needed,
+          authority_assigned: emergencyDispatch.authority_assigned,
+        } : null,
+      };
       
-      // Now wait for photo upload to complete in background
-      const photoURL = await photoUploadPromise;
-      
-      // Update alert with photo URL if upload succeeded
-      if (alertId && photoURL) {
-        await analyzeAndUpdateAlert(alertId, photoURL);
-      }
+      await addDoc(collection(db, 'emergency_alerts'), alertData);
       
       toast.dismiss();
       setIsSubmitted(true);
       toast.success('Request submitted successfully!');
     } catch (error) {
-      console.error("Failed to submit SOS:", error);
-      toast.error("Failed to submit request. Please try again.");
+      // DEBUGGING: Log the full error for permissions debugging
+      console.error('Firestore Error:', error);
+      toast.dismiss();
+      toast.error("Failed to submit request. Check console for details.");
     } finally {
+      // UI FEEDBACK: Always clear submitting state, even on error
       setIsSubmitting(false);
     }
   };
@@ -293,6 +397,48 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
+      {/* Auto-Call Modal - Severity >= 7 */}
+      {showAutoCallModal && emergencyDispatch && emergencyDispatch.severity_score >= 7 && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm border-red-500 border-4 bg-white dark:bg-slate-900">
+            <CardHeader className="bg-red-600 text-white rounded-t-lg">
+              <div className="flex items-center gap-2">
+                <Siren className="h-6 w-6 animate-bounce" />
+                <CardTitle>CRITICAL EMERGENCY</CardTitle>
+              </div>
+            </CardHeader>
+            <CardContent className="p-6 space-y-4">
+              {/* Countdown */}
+              {autoCallCountdown !== null && (
+                <div className="text-center py-4 bg-red-100 dark:bg-red-900/50 rounded-lg border-2 border-red-500 animate-pulse">
+                  <p className="text-sm text-red-700 font-medium">AUTO-CALLING IN</p>
+                  <p className="text-6xl font-bold text-red-600">{autoCallCountdown}</p>
+                </div>
+              )}
+
+              <div className="text-center space-y-2">
+                <Badge className="bg-red-600 text-lg px-4 py-1">{emergencyDispatch.hazard_type}</Badge>
+                <p className="text-2xl font-bold">Severity: {emergencyDispatch.severity_score}/10</p>
+                <p className="text-sm text-muted-foreground">{emergencyDispatch.visual_evidence_summary}</p>
+              </div>
+
+              <a href={`tel:${getEmergencyNumber(emergencyDispatch.recommended_action)}`} className="block">
+                <Button className="w-full h-14 text-lg bg-red-600 hover:bg-red-700">
+                  <Phone className="h-5 w-5 mr-2" />
+                  CALL NOW: {getEmergencyNumber(emergencyDispatch.recommended_action)}
+                </Button>
+              </a>
+
+              {autoCallCountdown !== null && (
+                <Button variant="outline" className="w-full" onClick={cancelAutoCall}>
+                  Cancel Auto-Call
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       <div>
         <h1 className="text-2xl font-semibold mb-2">Request Emergency Aid</h1>
         <p className="text-muted-foreground">
@@ -379,7 +525,6 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                   placeholder="e.g., 4"
                   value={formData.peopleCount}
                   onChange={(e) => setFormData(prev => ({ ...prev, peopleCount: e.target.value }))}
-                  required
                 />
               </div>
               <div>
@@ -420,7 +565,6 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                 value={formData.description}
                 onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                 rows={4}
-                required
               />
             </div>
           </CardContent>
@@ -436,6 +580,14 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
             <CardDescription>
               Upload a photo of your situation. AI will analyze it to prioritize your request.
             </CardDescription>
+            {!geminiConfigured && (
+              <Alert className="mt-3 border-amber-300 bg-amber-50 dark:bg-amber-950/30">
+                <AlertTriangle className="h-4 w-4 text-amber-600" />
+                <AlertDescription className="text-amber-700 dark:text-amber-300">
+                  AI analysis unavailable - VITE_GEMINI_API_KEY not configured. Photos will still be uploaded but won&apos;t be analyzed.
+                </AlertDescription>
+              </Alert>
+            )}
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Hidden file inputs */}
@@ -494,8 +646,97 @@ export function AidRequestForm({ user }: AidRequestFormProps) {
                   )}
                 </div>
                 
-                {/* AI Analysis Results */}
-                {instantAnalysis && (
+                {/* AI Emergency Dispatcher Results */}
+                {emergencyDispatch && (
+                  <div className={`p-4 rounded-lg border-2 ${
+                    emergencyDispatch.status_level === 'critical' 
+                      ? 'bg-red-50 dark:bg-red-950/50 border-red-500' 
+                      : emergencyDispatch.status_level === 'monitoring'
+                        ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-400'
+                        : 'bg-green-50 dark:bg-green-950/50 border-green-400'
+                  }`}>
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className={`h-5 w-5 ${
+                          emergencyDispatch.status_level === 'critical' ? 'text-red-600' : 
+                          emergencyDispatch.status_level === 'monitoring' ? 'text-amber-600' : 'text-green-600'
+                        }`} />
+                        <span className="font-semibold">Emergency Dispatcher AI</span>
+                      </div>
+                      <Badge className={
+                        emergencyDispatch.status_level === 'critical' ? 'bg-red-600' : 
+                        emergencyDispatch.status_level === 'monitoring' ? 'bg-amber-500' : 'bg-green-600'
+                      }>
+                        {emergencyDispatch.status_level.toUpperCase()}
+                      </Badge>
+                    </div>
+
+                    {/* Hazard & Severity */}
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div className="bg-white dark:bg-slate-900 p-2 rounded border">
+                        <p className="text-xs text-muted-foreground">Hazard Type</p>
+                        <p className="font-semibold">{emergencyDispatch.hazard_type}</p>
+                      </div>
+                      <div className="bg-white dark:bg-slate-900 p-2 rounded border">
+                        <p className="text-xs text-muted-foreground">Severity Score</p>
+                        <p className="font-semibold">{emergencyDispatch.severity_score}/10</p>
+                      </div>
+                    </div>
+
+                    {/* Visual Evidence */}
+                    <div className="mb-3">
+                      <p className="text-xs text-muted-foreground mb-1">Visual Evidence</p>
+                      <p className="text-sm">{emergencyDispatch.visual_evidence_summary}</p>
+                    </div>
+
+                    {/* Recommended Action */}
+                    {emergencyDispatch.recommended_action !== 'none' && (
+                      <div className={`p-3 rounded-lg mb-3 ${
+                        emergencyDispatch.status_level === 'critical' 
+                          ? 'bg-red-100 dark:bg-red-900/50' 
+                          : 'bg-amber-100 dark:bg-amber-900/50'
+                      }`}>
+                        <p className="text-xs font-medium mb-1">RECOMMENDED ACTION</p>
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-5 w-5" />
+                          <span className="font-bold text-lg">
+                            Call {emergencyDispatch.recommended_action.replace('call_', '')} - {emergencyDispatch.authority_assigned}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Equipment Needed */}
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-2">Equipment Checklist for First Responder</p>
+                      <div className="flex flex-wrap gap-1">
+                        {emergencyDispatch.equipment_needed.map((item, idx) => (
+                          <Badge key={idx} variant="outline" className="text-xs">
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Secondary Risks */}
+                    {emergencyDispatch.secondary_risks && emergencyDispatch.secondary_risks.length > 0 && (
+                      <div className="mt-3 pt-3 border-t">
+                        <p className="text-xs text-muted-foreground mb-1">Secondary Risks Detected</p>
+                        <div className="flex flex-wrap gap-1">
+                          {emergencyDispatch.secondary_risks.map((risk, idx) => (
+                            <Badge key={idx} variant="destructive" className="text-xs">
+                              {risk}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Basic Analysis Fallback (if dispatch failed but basic worked) */}
+                {instantAnalysis && !emergencyDispatch && (
                   <div className={`p-3 rounded-lg ${
                     instantAnalysis.isFalseAlarm 
                       ? 'bg-red-100 dark:bg-red-950 border border-red-300' 

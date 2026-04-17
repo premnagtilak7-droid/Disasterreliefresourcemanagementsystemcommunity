@@ -10,12 +10,22 @@ import {
   AlertTriangle,
   Calendar,
   Award,
-  Settings
+  Settings,
+  Loader2,
+  Phone
 } from 'lucide-react';
 import { VolunteerMapView } from '../VolunteerMapView';
 import { VolunteerSettings } from '../VolunteerSettings';
 import { RescueHistory } from '../RescueHistory';
-import { getResolvedCountByVolunteer, subscribeToPendingAlerts } from '@/lib/alerts';
+import { VolunteerVerification } from '../VolunteerVerification';
+import { VolunteerVerificationResult } from '@/lib/gemini';
+import { 
+  getResolvedCountByVolunteer, 
+  subscribeToPendingAlerts, 
+  markAlertAsSolved, 
+  AlertWithId 
+} from '@/lib/alerts';
+import { toast } from 'sonner';
 
 interface VolunteerDashboardProps {
   user: User;
@@ -26,23 +36,71 @@ interface VolunteerDashboardProps {
 export function VolunteerDashboard({ user, activeView, setActiveView }: VolunteerDashboardProps) {
   const [peopleHelped, setPeopleHelped] = useState(0);
   const [pendingNearby, setPendingNearby] = useState(0);
+  const [pendingAlerts, setPendingAlerts] = useState<AlertWithId[]>([]);
+  const [isResolving, setIsResolving] = useState<string | null>(null);
+  const [isVerified, setIsVerified] = useState<boolean>(() => {
+    // Check localStorage for previous verification
+    const saved = localStorage.getItem(`volunteer_verified_${user.id}`);
+    return saved === 'true';
+  });
+  const [verificationData, setVerificationData] = useState<VolunteerVerificationResult | null>(null);
 
-  // Fetch real volunteer stats
+  // Fetch volunteer stats on mount and when resolving alerts
   useEffect(() => {
     async function fetchStats() {
-      const resolvedCount = await getResolvedCountByVolunteer(user.id);
-      setPeopleHelped(resolvedCount);
+      const count = await getResolvedCountByVolunteer(user.id);
+      setPeopleHelped(count);
     }
     fetchStats();
   }, [user.id]);
 
-  // Subscribe to pending alerts count
+  // Subscribe to pending alerts in real-time
   useEffect(() => {
     const unsubscribe = subscribeToPendingAlerts((alerts) => {
       setPendingNearby(alerts.length);
+      setPendingAlerts(alerts);
     });
     return () => unsubscribe();
   }, []);
+
+  // Handle marking an alert as solved
+  const handleMarkAsSolved = async (alertId: string) => {
+    setIsResolving(alertId);
+    try {
+      await markAlertAsSolved(alertId, user.id);
+      toast.success('Alert marked as solved!');
+    } catch (error) {
+      console.error('Failed to mark alert as solved:', error);
+      toast.error('Failed to mark as solved. Please try again.');
+    } finally {
+      setIsResolving(null);
+    }
+  };
+
+  // Handle volunteer verification completion
+  const handleVerificationComplete = (result: VolunteerVerificationResult) => {
+    setVerificationData(result);
+    if (result.isVerified) {
+      setIsVerified(true);
+      localStorage.setItem(`volunteer_verified_${user.id}`, 'true');
+      toast.success(`Welcome, ${result.name}! You are now a verified volunteer.`);
+    }
+  };
+
+  const handleSkipVerification = () => {
+    setIsVerified(true); // Allow access but without full verification
+    toast.info('Proceeding without verification. Some features may be limited.');
+  };
+
+  // Show verification screen if volunteer is not verified and requests it
+  if (activeView === 'verify') {
+    return (
+      <VolunteerVerification 
+        onVerificationComplete={handleVerificationComplete}
+        onSkip={() => setActiveView('dashboard')}
+      />
+    );
+  }
 
   if (activeView === 'settings') {
     return <VolunteerSettings user={user} />;
@@ -59,23 +117,120 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
   if (activeView === 'tasks') {
     return (
       <div className="p-6 space-y-6 max-w-4xl mx-auto">
-        <div>
-          <h1 className="text-2xl font-semibold mb-2">My Tasks</h1>
-          <p className="text-muted-foreground">View pending alerts requiring assistance</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold mb-2">Pending Aid Requests</h1>
+            <p className="text-muted-foreground">View and manage alerts requiring assistance</p>
+          </div>
+          <Badge variant="outline" className="text-sm">
+            {pendingAlerts.length} pending
+          </Badge>
         </div>
 
-        <Card>
-          <CardContent className="p-8 text-center">
-            <MapPin className="h-12 w-12 mx-auto mb-4 text-blue-500" />
-            <h3 className="text-lg font-medium">View Alerts on Map</h3>
-            <p className="text-muted-foreground mt-2 mb-4">
-              Open the map view to see pending alerts within 2km of your location
-            </p>
-            <Button onClick={() => setActiveView('map')}>
-              Open Map View
-            </Button>
-          </CardContent>
-        </Card>
+        {pendingAlerts.length === 0 ? (
+          <Card>
+            <CardContent className="p-8 text-center">
+              <CheckCircle className="h-12 w-12 mx-auto mb-4 text-green-500" />
+              <h3 className="text-lg font-medium">All Clear!</h3>
+              <p className="text-muted-foreground mt-2">
+                No pending alerts at the moment
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-4">
+            {pendingAlerts.map((alert) => (
+              <Card key={alert.id}>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <CardTitle className="text-lg">{alert.emergencyType || 'Aid'} Request</CardTitle>
+                      <Badge className="bg-amber-500 hover:bg-amber-600 text-white">
+                        Pending
+                      </Badge>
+                    </div>
+                    <span className="text-sm text-muted-foreground">#{alert.id.slice(0, 8)}</span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <p className="text-sm font-medium">Name</p>
+                      <p className="text-sm text-muted-foreground">{alert.name || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Phone</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm text-muted-foreground">{alert.phone || 'N/A'}</p>
+                        {alert.phone && (
+                          <Button 
+                            size="sm" 
+                            variant="ghost" 
+                            className="h-6 w-6 p-0"
+                            onClick={() => window.open(`tel:${alert.phone}`)}
+                          >
+                            <Phone className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Location</p>
+                      <p className="text-sm text-muted-foreground">
+                        {alert.latitude && alert.longitude 
+                          ? `${alert.latitude.toFixed(6)}, ${alert.longitude.toFixed(6)}`
+                          : alert.location || 'N/A'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Description</p>
+                      <p className="text-sm text-muted-foreground">{alert.description || 'N/A'}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      className="flex-1 bg-green-600 hover:bg-green-700"
+                      onClick={() => handleMarkAsSolved(alert.id)}
+                      disabled={isResolving === alert.id}
+                    >
+                      {isResolving === alert.id ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Resolving...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                          Mark as Resolved
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        if (alert.latitude && alert.longitude) {
+                          window.open(
+                            `https://www.google.com/maps/dir/?api=1&destination=${alert.latitude},${alert.longitude}`,
+                            '_blank'
+                          );
+                        }
+                      }}
+                      disabled={!alert.latitude || !alert.longitude}
+                    >
+                      <MapPin className="h-4 w-4 mr-2" />
+                      Navigate
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+
+        <Button variant="outline" className="w-full" onClick={() => setActiveView('map')}>
+          <MapPin className="h-4 w-4 mr-2" />
+          Open Map View
+        </Button>
       </div>
     );
   }
@@ -122,12 +277,57 @@ export function VolunteerDashboard({ user, activeView, setActiveView }: Voluntee
 
   return (
     <div className="p-6 space-y-6 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-semibold mb-2">Welcome, {user.name}</h1>
-        <p className="text-muted-foreground">
-          Ready to make a difference in disaster relief operations
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold mb-2">Welcome, {user.name}</h1>
+          <p className="text-muted-foreground">
+            Ready to make a difference in disaster relief operations
+          </p>
+        </div>
+        {/* Verification Badge */}
+        {isVerified ? (
+          <Badge className="bg-green-600 text-white flex items-center gap-1">
+            <CheckCircle className="h-3 w-3" />
+            Verified
+          </Badge>
+        ) : (
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => setActiveView('verify')}
+            className="border-blue-300 text-blue-600 hover:bg-blue-50"
+          >
+            <Award className="h-4 w-4 mr-1" />
+            Verify ID
+          </Button>
+        )}
       </div>
+
+      {/* Verification Prompt for Unverified Volunteers */}
+      {!isVerified && (
+        <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-950/20">
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                <Award className="h-5 w-5 text-blue-600" />
+              </div>
+              <div>
+                <p className="font-medium text-blue-800 dark:text-blue-300">Complete Your Verification</p>
+                <p className="text-sm text-blue-600 dark:text-blue-400">
+                  Upload your Government ID or Rescue Certificate to get verified
+                </p>
+              </div>
+            </div>
+            <Button 
+              size="sm" 
+              onClick={() => setActiveView('verify')}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Verify Now
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Performance Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

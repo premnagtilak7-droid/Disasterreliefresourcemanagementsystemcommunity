@@ -13,18 +13,52 @@ import {
   Heart,
   Loader2,
   PhoneOff,
-  Navigation
+  Navigation,
+  X,
+  MessageCircle,
+  Users
 } from 'lucide-react';
 import { AidRequestForm } from '../AidRequestForm';
-import { submitEmergencySOS, subscribeToPendingAlerts, AlertWithId } from '@/lib/alerts';
+import { AlertChat } from '../AlertChat';
+import { submitEmergencySOS, subscribeToUserAlerts, AlertWithId } from '@/lib/alerts';
 import { subscribeToNearbyVolunteers, getCurrentLocation, NearbyVolunteer, getCityFromCoordinates } from '@/lib/geolocation';
+import { db } from '@/lib/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { toast } from 'sonner';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../ui/dialog';
 
 interface VictimDashboardProps {
   user: User;
   activeView: string;
   setActiveView: (view: string) => void;
 }
+
+// Support Group interface for Firestore data
+interface SupportGroup {
+  id: string;
+  name: string;
+  description: string;
+  whatsappLink: string;
+  members: number;
+  isActive?: boolean;
+}
+
+// Fallback data when no Firestore groups exist
+const FALLBACK_SUPPORT_GROUPS: SupportGroup[] = [
+  {
+    id: 'fallback-1',
+    name: 'Contact Local Authorities',
+    description: 'Reach out to your local emergency management office',
+    whatsappLink: 'tel:112',
+    members: 0,
+  },
+];
 
 export function VictimDashboard({ user, activeView, setActiveView }: VictimDashboardProps) {
   const [isSOSLoading, setIsSOSLoading] = useState(false);
@@ -33,6 +67,9 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
   const [nearbyVolunteers, setNearbyVolunteers] = useState<NearbyVolunteer[]>([]);
   const [cityName, setCityName] = useState<string>('Your Location');
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [isSupportGroupsOpen, setIsSupportGroupsOpen] = useState(false);
+  const [supportGroups, setSupportGroups] = useState<SupportGroup[]>([]);
+  const [isLoadingGroups, setIsLoadingGroups] = useState(true);
 
   // Get current location and nearby volunteers
   useEffect(() => {
@@ -71,11 +108,40 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
     return () => unsubscribe();
   }, [userLocation]);
 
-  // Subscribe to user's alerts
+  // Subscribe to user's own alerts in real-time (shows solved status instantly)
   useEffect(() => {
-    const unsubscribe = subscribeToPendingAlerts((alerts) => {
+    const unsubscribe = subscribeToUserAlerts(user.id, (alerts) => {
       setUserAlerts(alerts);
     });
+    return () => unsubscribe();
+  }, [user.id]);
+
+  // Subscribe to real support groups from Firestore
+  useEffect(() => {
+    const groupsRef = collection(db, 'supportGroups');
+    const unsubscribe = onSnapshot(groupsRef, (snapshot) => {
+      const groups: SupportGroup[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.isActive !== false) { // Include groups that are active or have no isActive field
+          groups.push({
+            id: doc.id,
+            name: data.name || 'Unnamed Group',
+            description: data.description || '',
+            whatsappLink: data.whatsappLink || '',
+            members: data.members || 0,
+            isActive: data.isActive,
+          });
+        }
+      });
+      setSupportGroups(groups.length > 0 ? groups : FALLBACK_SUPPORT_GROUPS);
+      setIsLoadingGroups(false);
+    }, (error) => {
+      console.error('Error fetching support groups:', error);
+      setSupportGroups(FALLBACK_SUPPORT_GROUPS);
+      setIsLoadingGroups(false);
+    });
+
     return () => unsubscribe();
   }, []);
 
@@ -139,37 +205,53 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <CardTitle className="text-lg">{alert.emergencyType} Request</CardTitle>
-                      <Badge variant={
-                        alert.status === 'resolved' ? 'default' :
-                        alert.status === 'acknowledged' ? 'secondary' : 'outline'
-                      }>
-                        {alert.status}
+                      <CardTitle className="text-lg">{alert.emergencyType || 'Aid'} Request</CardTitle>
+                      <Badge 
+                        className={
+                          alert.status === 'solved' || alert.status === 'resolved' 
+                            ? 'bg-green-500 hover:bg-green-600 text-white' 
+                            : 'bg-amber-500 hover:bg-amber-600 text-white'
+                        }
+                      >
+                        {alert.status === 'solved' || alert.status === 'resolved' ? 'Solved' : 'Pending'}
                       </Badge>
                     </div>
                     <span className="text-sm text-muted-foreground">#{alert.id.slice(0, 8)}</span>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm font-medium">Location</p>
-                      <p className="text-sm text-muted-foreground">{alert.location}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">Description</p>
-                      <p className="text-sm text-muted-foreground">{alert.description}</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      </div>
-    );
+<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div>
+  <p className="text-sm font-medium">Location</p>
+  <p className="text-sm text-muted-foreground">{alert.location}</p>
+  </div>
+  <div>
+  <p className="text-sm font-medium">Description</p>
+  <p className="text-sm text-muted-foreground">{alert.description}</p>
+  </div>
+  </div>
+  
+  {/* Real-time chat with volunteer - only show for pending alerts */}
+  {alert.status !== 'solved' && alert.status !== 'resolved' && (
+    <div className="mt-4 pt-4 border-t">
+      <AlertChat
+        alertId={alert.id}
+        userId={user.id}
+        userName={user.name}
+        userRole="victim"
+        compact
+      />
+    </div>
+  )}
+  </CardContent>
+  </Card>
+  ))
+  )}
+  </div>
+  </div>
+  );
   }
-
+  
   if (activeView === 'resources') {
     return (
       <div className="p-6 space-y-6 max-w-4xl mx-auto">
@@ -393,22 +475,28 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
                 <p>No active requests</p>
               </div>
             ) : (
-              userAlerts.slice(0, 3).map((alert) => (
-                <div key={alert.id} className="flex items-center justify-between p-3 border rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    {alert.status === 'resolved' ? (
-                      <CheckCircle className="h-5 w-5 text-green-600" />
-                    ) : (
-                      <Clock className="h-5 w-5 text-orange-600" />
-                    )}
-                    <div>
-                      <p className="font-medium">{alert.emergencyType} Request</p>
-                      <p className="text-sm text-muted-foreground capitalize">
-                        {alert.status}
-                      </p>
-                    </div>
-                  </div>
-                  <Badge variant={alert.status === 'resolved' ? 'default' : 'secondary'}>
+userAlerts.slice(0, 3).map((alert) => (
+  <div key={alert.id} className="flex items-center justify-between p-3 border rounded-lg">
+  <div className="flex items-center space-x-3">
+  {alert.status === 'solved' || alert.status === 'resolved' ? (
+  <CheckCircle className="h-5 w-5 text-green-600" />
+  ) : (
+  <Clock className="h-5 w-5 text-amber-500" />
+  )}
+  <div>
+  <p className="font-medium">{alert.emergencyType || 'Aid'} Request</p>
+  <Badge 
+    className={
+      alert.status === 'solved' || alert.status === 'resolved'
+        ? 'bg-green-500 hover:bg-green-600 text-white text-xs'
+        : 'bg-amber-500 hover:bg-amber-600 text-white text-xs'
+    }
+  >
+    {alert.status === 'solved' || alert.status === 'resolved' ? 'Solved' : 'Pending'}
+  </Badge>
+  </div>
+  </div>
+  <Badge variant="outline">
                     #{alert.id.slice(0, 6)}
                   </Badge>
                 </div>
@@ -459,12 +547,62 @@ export function VictimDashboard({ user, activeView, setActiveView }: VictimDashb
               <Heart className="h-8 w-8 text-purple-600" />
               <h3 className="font-medium">Support Groups</h3>
               <p className="text-sm text-muted-foreground">Community assistance</p>
-              <Button size="sm" variant="outline">
+              <Button size="sm" variant="outline" onClick={() => setIsSupportGroupsOpen(true)}>
                 Connect
               </Button>
             </div>
           </CardContent>
         </Card>
+
+        {/* Support Groups Modal */}
+        <Dialog open={isSupportGroupsOpen} onOpenChange={setIsSupportGroupsOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5 text-purple-600" />
+                Community Support Groups
+              </DialogTitle>
+              <DialogDescription>
+                Join active community help groups for disaster relief coordination
+              </DialogDescription>
+            </DialogHeader>
+<div className="space-y-3 max-h-80 overflow-y-auto">
+  {isLoadingGroups ? (
+    <div className="flex items-center justify-center py-8">
+      <Loader2 className="h-6 w-6 animate-spin text-purple-600 mr-2" />
+      <span className="text-muted-foreground">Loading groups...</span>
+    </div>
+  ) : supportGroups.map((group) => (
+  <div key={group.id} className="p-4 border rounded-lg hover:bg-muted/50 transition-colors">
+  <div className="flex items-start justify-between">
+  <div className="flex-1">
+  <h4 className="font-medium">{group.name}</h4>
+  <p className="text-sm text-muted-foreground mt-1">{group.description}</p>
+{group.members > 0 && (
+    <p className="text-xs text-muted-foreground mt-2">
+      {group.members.toLocaleString()} members
+    </p>
+  )}
+                    </div>
+                    <Button 
+                      size="sm" 
+                      className="ml-3 bg-green-600 hover:bg-green-700"
+                      onClick={() => window.open(group.whatsappLink, '_blank')}
+                    >
+                      <MessageCircle className="h-4 w-4 mr-1" />
+                      Join Chat
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="pt-4 border-t">
+              <p className="text-xs text-muted-foreground text-center">
+                These groups are community-managed and provide peer support during emergencies
+              </p>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

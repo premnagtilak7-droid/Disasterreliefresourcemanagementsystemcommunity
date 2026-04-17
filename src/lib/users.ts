@@ -7,6 +7,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   sendPasswordResetEmail,
+  signInAnonymously,
 } from "firebase/auth";
 import {
   doc,
@@ -193,6 +194,38 @@ export async function signInWithGoogle(role: UserRole = 'victim'): Promise<UserD
       
       throw new Error(error.message || "Google sign-in failed");
     });
+}
+
+/**
+ * Sign in anonymously for emergency SOS
+ * Creates a temporary anonymous user for zero-friction emergency access
+ */
+export async function signInAnonymouslyForEmergency(): Promise<UserDocument> {
+  try {
+    const userCredential = await signInAnonymously(auth);
+    const { uid } = userCredential.user;
+
+    // Create anonymous user document
+    const userDoc: UserDocument = {
+      uid,
+      email: '',
+      name: 'Anonymous Emergency User',
+      role: 'victim',
+      createdAt: serverTimestamp(),
+    };
+
+    await setDoc(doc(db, "users", uid), {
+      ...userDoc,
+      isAnonymous: true,
+    });
+
+    console.log("ANONYMOUS USER SIGNED IN FOR EMERGENCY");
+    return userDoc;
+  } catch (error: unknown) {
+    console.error("Error signing in anonymously:", error);
+    const errorMessage = error instanceof Error ? error.message : "Anonymous sign-in failed";
+    throw new Error(errorMessage);
+  }
 }
 
 /**
